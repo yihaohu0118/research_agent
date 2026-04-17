@@ -66,7 +66,16 @@ class EnvClient:
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
-            logger.error(f"Request failed: {str(e)}, data: {data}")
+            response = getattr(e, "response", None)
+            response_body = None
+            if response is not None:
+                response_body = response.text[:2000]
+            if response_body:
+                logger.error(
+                    f"Request failed: {str(e)}, response_body={response_body}, data: {data}"
+                )
+            else:
+                logger.error(f"Request failed: {str(e)}, data: {data}")
             raise
 
     def get_env_profile(

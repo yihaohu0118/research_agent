@@ -84,10 +84,14 @@ bfcl_run python "$SCRIPT_DIR/bfcl_dataprocess.py"
 # 6. 设置环境变量
 echo "🌎 设置环境变量..."
 export ENV_PATH="$SCRIPT_DIR"
-export BFCL_DATA_PATH="$ENV_PATH/bfcl_data/multi_turn_base_processed.jsonl"
-export BFCL_SPLID_ID_PATH="$ENV_PATH/bfcl_data/multi_turn_base_split_ids.json"
+export BFCL_DATA_PATH="$ENV_PATH/bfcl_data/multi_turn_processed.jsonl"
+export BFCL_SPLID_ID_PATH="$WORKSPACE_DIR/data/bfcl_400_split.json"
 export BFCL_ANSWER_PATH="$ENV_PATH/bfcl_eval/possible_answer"
 export OPENAI_API_KEY="$OPENAI_API_KEY"
+
+bfcl_run python "$WORKSPACE_DIR/scripts/test/check_bfcl_data_ids.py" \
+    --data "$BFCL_DATA_PATH" \
+    --split "$BFCL_SPLID_ID_PATH"
 
 
 
@@ -110,7 +114,7 @@ echo "- python"
 echo "- multi_turn_base"
 echo ""
 echo "示例命令:"
-echo "export DATASET_NAME=multi_turn_base"
+echo "export DATASET_NAME=multi_turn"
 echo "export BFCL_DATA_PATH=\"$ENV_PATH/bfcl_data/\${DATASET_NAME}_processed.jsonl\""
 echo "export BFCL_SPLID_ID_PATH=\"$ENV_PATH/bfcl_data/\${DATASET_NAME}_split_ids.json\""
 echo ""
@@ -123,5 +127,3 @@ echo "conda activate bfcl"
 echo "cd $BEYONDAGENT_DIR/env_service/launch_script"
 echo "bash bfcl.sh"
 echo "----------------------------------------"
-
-exec bash

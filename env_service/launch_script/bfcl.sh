@@ -70,21 +70,33 @@ else
     missing_required=1
 fi
 
+if [ "$missing_required" -eq 0 ]; then
+    if python "$PROJECT_ROOT/scripts/test/check_bfcl_data_ids.py" \
+        --data "$BFCL_DATA_PATH" \
+        --split "$BFCL_SPLID_ID_PATH"; then
+        :
+    else
+        echo "❌ BFCL 数据文件和 split id 不匹配"
+        missing_required=1
+    fi
+fi
+
 if [ "$missing_required" -ne 0 ]; then
     cat <<EOF
 
 BFCL environment is incomplete. Run setup once before launching BFCL:
 
   source "\$(conda info --base)/etc/profile.d/conda.sh"
-  conda activate agentevolver
+  conda activate bfcl
   bash env_service/environments/bfcl/setup.sh
 
-If setup.py leaves you inside a shell, exit it after setup completes, then run:
+After setup completes, run:
 
   conda activate bfcl
   python -c "import bfcl_eval; print('bfcl_eval ok')"
   test -f "$BFCL_DATA_PATH"
   test -d "$BFCL_ANSWER_PATH"
+  python "$PROJECT_ROOT/scripts/test/check_bfcl_data_ids.py" --data "$BFCL_DATA_PATH" --split "$BFCL_SPLID_ID_PATH"
 
 EOF
     exit 1

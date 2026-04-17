@@ -38,7 +38,8 @@ def bfcl_task_preprocess(
     train_ratio: float = 0.5,
     random_seed: int = 42,
     output_dir: str = "",
-    enable_shuffle: bool = False
+    enable_shuffle: bool = False,
+    output_prefix: Optional[str] = None,
 ) -> Dict[str, List[Dict[str, Any]]]:
     """
     Preprocess training dataset by loading test cases, processing them and splitting into train/test sets.
@@ -125,7 +126,7 @@ def bfcl_task_preprocess(
     if output_dir:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
-        test_categories_str = "_".join(test_categories)
+        test_categories_str = output_prefix or "_".join(test_categories)
 
         # 保存完整数据集
         full_jsonl_path = output_path / f"{test_categories_str}_processed.jsonl"
@@ -150,7 +151,22 @@ def bfcl_task_preprocess(
 
 if __name__ == "__main__":
 
-    test_categories_list=["all","all_scoring","multi_turn","single_turn","live","non_live","non_python","python","multi_turn_base"]
+    bfcl_task_preprocess(
+        test_categories=[
+            "multi_turn_base",
+            "multi_turn_miss_func",
+            "multi_turn_miss_param",
+            "multi_turn_long_context",
+        ],
+        train_ratio=0.5,
+        output_dir="./bfcl_data",
+        output_prefix="multi_turn",
+    )
+
+    print("-" * 50)
+    print("Explicit multi-turn combined dataset complete!")
+
+    test_categories_list=["all","all_scoring","single_turn","live","non_live","non_python","python","multi_turn_base"]
 
 
     for test_categories in test_categories_list:
