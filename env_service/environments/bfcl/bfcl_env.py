@@ -290,56 +290,6 @@ class BfclEnv(BaseEnv):
         self.total_output_tokens = 0
         self.tools_info = ""
 
-        # P0/P3: miss_func tracking — detect mid-episode tool reveals and expose
-        # diagnostic counters for BFCL multi_turn_miss_func analysis. The static
-        # <tools> block in the system prompt is never updated by the trainer, so
-        # we surface tool updates inline as an observable [TOOLS_UPDATED] block.
-        self._current_tool_names: tuple[str, ...] = ()
-        self._miss_func_names: set[str] = set()
-        self._miss_func_revealed: bool = False
-        self.miss_func_metrics: Dict[str, int] = self._make_empty_miss_func_metrics()
-
-    # ------------------------------------------------------------------ #
-    # P3 diagnostic helpers
-    # ------------------------------------------------------------------ #
-    @staticmethod
-    def _make_empty_miss_func_metrics() -> Dict[str, int]:
-        return {
-            # 1 if any miss_func reveal turn was reached by the env during this episode.
-            "miss_func_turn_reached": 0,
-            # number of tool calls rejected *before* reveal whose name is in the hidden set.
-            "miss_func_pre_reveal_rejected": 0,
-            # 1 if the model made a (non-rejected) call to a previously-missed function after reveal.
-            "miss_func_post_reveal_made_call": 0,
-            # number of rejected / malformed tool-call steps that occurred after reveal.
-            "miss_func_post_reveal_parse_fail": 0,
-            # number of times the env emitted a new tool set (should be >=1 if reveal fired).
-            "tools_updates_count": 0,
-            # 1 if this test entry is a miss_func-type task at all.
-            "miss_func_task": 0,
-        }
-
-    @staticmethod
-    def _collect_miss_func_names(test_entry: Dict[str, Any]) -> set[str]:
-        holdout = test_entry.get("holdout_function") or test_entry.get(
-            "missed_function"
-        ) or {}
-        names: set[str] = set()
-        if isinstance(holdout, dict):
-            for _, funcs in holdout.items():
-                for func in (funcs or []):
-                    if isinstance(func, dict):
-                        nm = (
-                            func.get("name")
-                            or func.get("function", {}).get("name")
-                            or ""
-                        )
-                    else:
-                        nm = str(func) if func else ""
-                    if nm:
-                        names.add(nm)
-        return names
-
     # ------------------------------------------------------------------ #
     # 生命周期
     # ------------------------------------------------------------------ #
@@ -365,24 +315,6 @@ class BfclEnv(BaseEnv):
         self.tools_info = "Available tools:\n" + "\n".join(
             f"- {t.get('function', {}).get('name', 'unknown')}" for t in tools
         )
-
-        # ── P0/P3: seed miss_func tracking for this episode ──────────────
-        self._current_tool_names = tuple(
-            sorted(
-                name
-                for name in (
-                    (t.get("function") or {}).get("name", "") for t in tools
-                )
-                if name
-            )
-        )
-        self._miss_func_names = self._collect_miss_func_names(self.test_entry)
-        self._miss_func_revealed = False
-        self.miss_func_metrics = self._make_empty_miss_func_metrics()
-        if self._miss_func_names or "miss_func" in str(
-            self.test_entry.get("id", "")
-        ):
-            self.miss_func_metrics["miss_func_task"] = 1
 
         first_query = (
             self.conversation_history[0]["content"] if self.conversation_history else ""
@@ -473,9 +405,6 @@ class BfclEnv(BaseEnv):
                 "tool_calls", []
             )
             assistant_entry["tool_calls"] = []
-            # P3: malformed call occurring after reveal is a post-reveal parse fail
-            if self._miss_func_revealed:
-                self.miss_func_metrics["miss_func_post_reveal_parse_fail"] += 1
             return StateMessage(
                 role="user",
                 content=f"[ERROR] Invalid tool call format: {parse_error}",
@@ -486,20 +415,6 @@ class BfclEnv(BaseEnv):
             raise RuntimeError(
                 "EnvHandler not initialised – call get_init_state() first."
             )
-
-        # P3: capture names attempted by the model this step BEFORE the handler
-        # decides to accept/reject them, so we can attribute rejections later.
-        attempted_call_names = [
-            (tc.get("function") or {}).get("name", "")
-            for tc in assistant_entry.get("tool_calls", [])
-        ]
-        attempted_call_names = [n for n in attempted_call_names if n]
-        pre_reveal_missed_attempts = (
-            0
-            if (self._miss_func_revealed or not self._miss_func_names)
-            else sum(1 for n in attempted_call_names if n in self._miss_func_names)
-        )
-
         # 与环境交互后env_response有两种返回情况: 
         # 1. 触发query, 附带着available tools列表, {"messages": [{"role": "user", "content": user_query}], "tools": tools} 
         # 2. 返回工具调用结果, {"messages": [{"role": "tool", "content": {<execution_results>}, 'tool_call_id': 'chatcmpl-tool-xxx'}]}
@@ -517,22 +432,6 @@ class BfclEnv(BaseEnv):
                 "tool_calls", []
             )
             assistant_entry["tool_calls"] = []
-            # P3: attribute rejections either to pre- or post-reveal
-            if pre_reveal_missed_attempts:
-                self.miss_func_metrics[
-                    "miss_func_pre_reveal_rejected"
-                ] += pre_reveal_missed_attempts
-            if self._miss_func_revealed:
-                self.miss_func_metrics["miss_func_post_reveal_parse_fail"] += 1
-        else:
-            # P3: a successful (non-rejected) call to a previously-missed function
-            # is the whole point of miss_func — mark it the first time it happens.
-            if (
-                self._miss_func_revealed
-                and attempted_call_names
-                and any(n in self._miss_func_names for n in attempted_call_names)
-            ):
-                self.miss_func_metrics["miss_func_post_reveal_made_call"] = 1
 
         # 把环境消息写回历史并构建新 StateMessage
         # 共有部分: role=<Role.USER: 'user'> timestamp='2025-xxx' metadata={} tool_call_id=''
@@ -541,6 +440,7 @@ class BfclEnv(BaseEnv):
         new_tool_calls: list[ToolCall] = []
         next_msg_content = ""
         
+        # FIXME: yunpeng - messages 可能是多个吗
         for idx, msg in enumerate(env_resp.get("messages", [])):
             self.conversation_history.append(msg)
             if msg["role"] == "tool":
@@ -550,52 +450,8 @@ class BfclEnv(BaseEnv):
                     result_mode=self.params.get("tool_result_mode", "plain_user"),
                 )
             elif msg["role"] == "user":
-                raw_user_content = msg.get("content", "")
-                next_msg_content = raw_user_content
-
-                # ── P0 FIX ────────────────────────────────────────────────
-                # When the env announces a new tool set (e.g. BFCL multi_turn
-                # miss_func reveal at turn N), the static <tools> block in the
-                # initial system prompt is never refreshed by the trainer.
-                # Small instruction-tuned models that were told to "only use
-                # tools listed in <tools>" therefore refuse to call the newly
-                # revealed function even though it appears in the user prompt.
-                # Surface the full, currently-available tool schema as an
-                # explicit [TOOLS_UPDATED] preamble on this user turn.
-                new_tools = env_resp.get("tools") or []
-                new_names = tuple(
-                    sorted(
-                        n
-                        for n in (
-                            (t.get("function") or {}).get("name", "")
-                            for t in new_tools
-                        )
-                        if n
-                    )
-                )
-                added = set(new_names) - set(self._current_tool_names)
-                if new_names and added:
-                    tool_prompt = tools_schema_to_qwen_prompt(
-                        new_tools,
-                        prompt_mode=self.params.get(
-                            "tool_prompt_mode", "t3rl_text"
-                        ),
-                    )
-                    preamble = (
-                        "[TOOLS_UPDATED] Additional tools are now available "
-                        "to you. The full, currently-available tool list is "
-                        "shown below; call these tools the usual way via "
-                        "<tool_call>{...}</tool_call>.\n\n"
-                        f"{tool_prompt}\n\n"
-                        "---\n\n"
-                    )
-                    next_msg_content = preamble + raw_user_content
-                    self._current_tool_names = new_names
-                    self.miss_func_metrics["tools_updates_count"] += 1
-                    if not self._miss_func_revealed:
-                        self._miss_func_revealed = True
-                        self.miss_func_metrics["miss_func_turn_reached"] = 1
-
+                next_msg_content = msg.get("content", "")
+                # FIXME: yunpeng 更新新的tool schema到user msg里
                 self.current_turn += 1
             elif msg["role"] == "env":
                 # two situations:
@@ -635,11 +491,6 @@ class BfclEnv(BaseEnv):
             raise ValueError(
                 f"Unsupported BFCL eval_policy={eval_policy!r}; use 'clean' or 'official'."
             )
-        # P3: surface miss_func diagnostics alongside accuracy so downstream
-        # trainers / stats modules can track them without re-parsing the
-        # conversation.
-        for k, v in self.miss_func_metrics.items():
-            result.setdefault(k, v)
         return result.get("accuracy", 0.0) if sparse else result
 
     def get_info(

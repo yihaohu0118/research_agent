@@ -349,15 +349,8 @@ class EnvHandler:
                 available_function_names is not None
                 and function_name not in available_function_names
             ):
-                # Give the model an actionable hint: additional tools may be
-                # revealed on a later turn, so the right recovery is to reply
-                # to the user in plain text, not to keep retrying the same
-                # missing tool and burn the step budget.
                 raise ValueError(
-                    f"Tool '{function_name}' is not in the current tool list. "
-                    "Do not retry this function right now; respond to the "
-                    "user in plain text instead. More tools may become "
-                    "available on a later turn."
+                    f"Tool '{function_name}' is not available in the current tool list."
                 )
 
             arguments = function.get("arguments", "{}")
