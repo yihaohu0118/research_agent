@@ -40,22 +40,54 @@ echo "BFCL_HOST: $BFCL_HOST"
 echo "BFCL_PORT: $BFCL_PORT"
 
 # 检查文件是否存在
+missing_required=0
+
+if python -c "import bfcl_eval" >/dev/null 2>&1; then
+    echo "✅ bfcl_eval Python package is importable"
+else
+    echo "❌ bfcl_eval Python package is not importable in the current environment"
+    missing_required=1
+fi
+
 if [ -f "$BFCL_DATA_PATH" ]; then
     echo "✅ 数据文件存在: $BFCL_DATA_PATH"
 else
     echo "❌ 数据文件不存在: $BFCL_DATA_PATH"
+    missing_required=1
 fi
 
 if [ -f "$BFCL_SPLID_ID_PATH" ]; then
     echo "✅ 分割ID文件存在: $BFCL_SPLID_ID_PATH"
 else
     echo "❌ 分割ID文件不存在: $BFCL_SPLID_ID_PATH"
+    missing_required=1
 fi
 
 if [ -d "$BFCL_ANSWER_PATH" ]; then
     echo "✅ 答案文件夹存在: $BFCL_ANSWER_PATH"
 else
     echo "❌ 答案文件夹不存在: $BFCL_ANSWER_PATH"
+    missing_required=1
+fi
+
+if [ "$missing_required" -ne 0 ]; then
+    cat <<EOF
+
+BFCL environment is incomplete. Run setup once before launching BFCL:
+
+  source "\$(conda info --base)/etc/profile.d/conda.sh"
+  conda activate agentevolver
+  bash env_service/environments/bfcl/setup.sh
+
+If setup.py leaves you inside a shell, exit it after setup completes, then run:
+
+  conda activate bfcl
+  python -c "import bfcl_eval; print('bfcl_eval ok')"
+  test -f "$BFCL_DATA_PATH"
+  test -d "$BFCL_ANSWER_PATH"
+
+EOF
+    exit 1
 fi
 
 export OPENAI_API_KEY=xx

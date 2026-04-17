@@ -50,7 +50,7 @@ cd "$SCRIPT_DIR/"
 echo "当前工作目录: $(pwd)"
 echo "脚本目录: $SCRIPT_DIR"
 
-python "$SCRIPT_DIR/bfcl_dataprocess.py"
+conda run -n bfcl python "$SCRIPT_DIR/bfcl_dataprocess.py"
 
 # 6. 设置环境变量
 echo "🌎 设置环境变量..."
