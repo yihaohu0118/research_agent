@@ -820,6 +820,18 @@ trainer:
   # Save frequency (by iteration) for model checkpoints
   save_freq: -1
 
+  # Save a checkpoint whenever validation reaches a new best score
+  save_best_checkpoint: False
+
+  # Exact validation metric key to monitor. If null, auto-pick val-core acc/reward mean.
+  best_checkpoint_metric: null
+
+  # Whether larger or smaller metric values are better: "max" or "min"
+  best_checkpoint_mode: max
+
+  # Save best checkpoints even for validation-only runs
+  save_best_checkpoint_in_val_only: False
+
   # Resume mode: "auto", "disable", or "resume_path"
   # "auto": resume from last checkpoint if available
   # "disable": start from scratch

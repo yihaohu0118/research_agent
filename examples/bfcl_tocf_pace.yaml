@@ -121,6 +121,10 @@ trainer:
   project_name: "bfcl_tocf_pace"
   experiment_name: "bfcl_tocf_pace"
   save_freq: 0
+  save_best_checkpoint: true
+  best_checkpoint_metric: null
+  best_checkpoint_mode: max
+  save_best_checkpoint_in_val_only: false
   save_limit: 0
   test_freq: 10
   total_epochs: 10

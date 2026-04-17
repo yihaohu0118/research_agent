@@ -111,6 +111,10 @@ trainer:
   project_name: "appworld_qwen25-7b"
   experiment_name: "appworld_qwen25-7b_baseline"
   save_freq: 10000
+  save_best_checkpoint: false
+  best_checkpoint_metric: null
+  best_checkpoint_mode: max
+  save_best_checkpoint_in_val_only: false
   test_freq: 10
   total_epochs: 40
   val_before_train: true
