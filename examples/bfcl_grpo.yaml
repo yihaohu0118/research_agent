@@ -127,6 +127,7 @@ trainer:
   save_best_checkpoint: true
   best_checkpoint_metric: null
   best_checkpoint_mode: max
+  keep_only_best_checkpoint: true
   save_best_checkpoint_in_val_only: false
   save_limit: 0
   test_freq: 10

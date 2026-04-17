@@ -829,6 +829,9 @@ trainer:
   # Whether larger or smaller metric values are better: "max" or "min"
   best_checkpoint_mode: max
 
+  # Remove older global_step_* checkpoints after a new validation best is saved
+  keep_only_best_checkpoint: True
+
   # Save best checkpoints even for validation-only runs
   save_best_checkpoint_in_val_only: False
 

@@ -18,6 +18,7 @@ This trainer supports model-agonistic model initialization with huggingface
 """
 
 import os
+import shutil
 import uuid
 from collections import defaultdict
 from concurrent.futures.thread import ThreadPoolExecutor
@@ -1038,6 +1039,11 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
             return False
         return True
 
+    def _keep_only_best_checkpoint_enabled(self) -> bool:
+        return self._best_checkpoint_enabled() and bool(
+            self.config.trainer.get("keep_only_best_checkpoint", True)
+        )
+
     @staticmethod
     def _metric_to_float(value: Any) -> float | None:
         try:
@@ -1113,6 +1119,35 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
 
         return checkpoint_dir
 
+    def _cleanup_non_best_checkpoints(self, best_checkpoint_dir: str) -> int:
+        if not self._keep_only_best_checkpoint_enabled():
+            return 0
+
+        local_dir = self.config.trainer.default_local_dir
+        best_abs = os.path.abspath(best_checkpoint_dir)
+        removed = 0
+
+        if not os.path.isdir(local_dir):
+            return removed
+
+        for name in os.listdir(local_dir):
+            if not name.startswith("global_step_"):
+                continue
+            path = os.path.join(local_dir, name)
+            if os.path.abspath(path) == best_abs:
+                continue
+            try:
+                if os.path.isdir(path) and not os.path.islink(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
+                removed += 1
+                print(f"[best-checkpoint] removed non-best checkpoint: {path}")
+            except OSError as exc:
+                print(f"[best-checkpoint] could not remove {path}: {exc}")
+
+        return removed
+
     def _maybe_save_best_checkpoint(self, val_metrics: dict[str, Any]) -> dict[str, float]:
         if not self._best_checkpoint_enabled():
             return {}
@@ -1154,6 +1189,7 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
         )
         self._save_checkpoint()
         checkpoint_dir = self._write_best_checkpoint_marker(metric_name, metric_value)
+        removed_count = self._cleanup_non_best_checkpoints(checkpoint_dir)
         print(f"[best-checkpoint] saved best checkpoint to {checkpoint_dir}")
 
         return {
@@ -1161,6 +1197,7 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
             "best_checkpoint/current_metric": metric_value,
             "best_checkpoint/best_metric": metric_value,
             "best_checkpoint/best_step": float(self.global_steps),
+            "best_checkpoint/removed_non_best": float(removed_count),
         }
     
     def initialize_exp_pool(self):
@@ -1608,7 +1645,8 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                                 last_val_metrics = val_metrics
                         metrics.update(val_metrics)
 
-                    if self.config.trainer.save_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.save_freq == 0):
+                    keep_only_best = self._keep_only_best_checkpoint_enabled()
+                    if self.config.trainer.save_freq > 0 and not keep_only_best and (is_last_step or self.global_steps % self.config.trainer.save_freq == 0):
                         if not saved_checkpoint_this_step:
                             with _timer("save_checkpoint", timing_raw):
                                 self._save_checkpoint()  # ⭐ Save the current state of the model as a checkpoint
