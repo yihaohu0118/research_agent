@@ -19,12 +19,39 @@ export BFCL_ROOT="$BFCL_ROOT"
 export PYTHONPATH="$BEYONDAGENT_DIR:$PYTHONPATH"
 
 
+BFCL_CONDA_ENV="${BFCL_CONDA_ENV:-bfcl}"
+
+is_active_bfcl_env() {
+    [ "${CONDA_DEFAULT_ENV:-}" = "$BFCL_CONDA_ENV" ]
+}
+
+conda_env_ready() {
+    conda run -n "$BFCL_CONDA_ENV" python -V >/dev/null 2>&1
+}
+
+bfcl_run() {
+    if is_active_bfcl_env; then
+        "$@"
+    else
+        conda run -n "$BFCL_CONDA_ENV" "$@"
+    fi
+}
+
 # 3. Conda 环境创建
-if ! conda info --envs | grep -w "bfcl" &>/dev/null; then
-    echo "🐍 创建 Conda 环境 bfcl（Python 3.11.13）..."
-    conda create -n bfcl python=3.11.13 -y
+if is_active_bfcl_env; then
+    echo "✅ 当前已激活 Conda 环境 $BFCL_CONDA_ENV。"
+elif conda_env_ready; then
+    echo "✅ Conda 环境 $BFCL_CONDA_ENV 已可用。"
 else
-    echo "⚠️ Conda 环境 bfcl 已存在，请删除或修改。（本次已跳过创建）。"
+    if conda info --envs | awk '{print $1}' | grep -x "$BFCL_CONDA_ENV" >/dev/null 2>&1; then
+        echo "❌ Conda 环境 $BFCL_CONDA_ENV 存在但 conda run 无法使用。"
+        echo "请先执行："
+        echo "  conda activate $BFCL_CONDA_ENV"
+        echo "  bash $SCRIPT_DIR/setup.sh"
+        exit 1
+    fi
+    echo "🐍 创建 Conda 环境 $BFCL_CONDA_ENV（Python 3.11.13）..."
+    conda create -n "$BFCL_CONDA_ENV" python=3.11.13 -y
 fi
 
 # 4. 安装依赖
@@ -39,8 +66,8 @@ fi
 
 echo "📋 安装 Python 依赖..."
 
-conda run -n bfcl pip install -e "$SCRIPT_DIR/gorilla/berkeley-function-call-leaderboard/."
-conda run -n bfcl pip install -r "$SCRIPT_DIR/requirements.txt"
+bfcl_run pip install -e "$SCRIPT_DIR/gorilla/berkeley-function-call-leaderboard/."
+bfcl_run pip install -r "$SCRIPT_DIR/requirements.txt"
 
 # 5. 准备数据
 echo "📁 准备 BFCL 数据..."
@@ -50,7 +77,7 @@ cd "$SCRIPT_DIR/"
 echo "当前工作目录: $(pwd)"
 echo "脚本目录: $SCRIPT_DIR"
 
-conda run -n bfcl python "$SCRIPT_DIR/bfcl_dataprocess.py"
+bfcl_run python "$SCRIPT_DIR/bfcl_dataprocess.py"
 
 # 6. 设置环境变量
 echo "🌎 设置环境变量..."
