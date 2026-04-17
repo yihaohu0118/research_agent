@@ -55,12 +55,14 @@ else
 fi
 
 # 4. 安装依赖
+cd "$SCRIPT_DIR"
 if [ -d "$SCRIPT_DIR/gorilla" ]; then
     echo "🔄 更新 gorilla 仓库..."
     cd "$SCRIPT_DIR/gorilla"
     git pull
 else
     echo "📦 克隆 gorilla 仓库..."
+    cd "$SCRIPT_DIR"
     git clone https://github.com/ShishirPatil/gorilla.git
 fi
 
