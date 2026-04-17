@@ -1,0 +1,45 @@
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
+defaults:
+  - ppo_trainer
+  - agentevolver
+  - _self_
+
+env_service:
+  env_type: "diplomacy"
+
+trainer:
+  experiment_name: diplomacy_game
+
+# Agentscope workflow configuration
+actor_rollout_ref:
+  rollout:
+    # Specify the agentscope workflow class to use
+    # Format: "module.path->WorkflowClassName"
+    agentscope_workflow: "games.games.diplomacy.workflows.rollout_workflow->DiplomacyWorkflow"
+
+# self-navigating
+exp_manager:
+  val_rollout_mode: "woexp"
+  train_rollout_mode: "woexp"
+  rollout_ratio: 0.0
+  train_sample_mode: "alldiscard"
+  train_sample_keepratio: 1.0
+  experience_template: "\n\nSome Related Experience to help you to complete the task:<EXP>{}</EXP>\n\n"
+  init_exp_before_training: False
+  init_exp_only: False
+  summary_batch_size: 8
+  reme:
+    base_url: "http://127.0.0.1:8001"
+    workspace_id: "default"
+    enable_summarizer: False
+    enable_context_generator: False
+    retrieve_top_k: 3
+    updated_freq: 0
+
+# self-attributing
+attribution_driven_credit_assignment:
+  enable: false

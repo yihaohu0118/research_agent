@@ -1,0 +1,1611 @@
+{
+  "meta": {
+    "teacher_model": "fake",
+    "env_type": "bfcl",
+    "env_mode": "baseline",
+    "num_tasks": 400,
+    "created_at": "2026-04-17T15:51:33"
+  },
+  "scores": {
+    "multi_turn_base_74": {
+      "success": 0.7332105785452785,
+      "reward": 0.7332105785452785
+    },
+    "multi_turn_base_77": {
+      "success": 0.7817152134565905,
+      "reward": 0.7817152134565905
+    },
+    "multi_turn_base_45": {
+      "success": 0.7596908918022389,
+      "reward": 0.7596908918022389
+    },
+    "multi_turn_base_191": {
+      "success": 0.8168923048341861,
+      "reward": 0.8168923048341861
+    },
+    "multi_turn_base_107": {
+      "success": 0.9001362235518489,
+      "reward": 0.9001362235518489
+    },
+    "multi_turn_base_184": {
+      "success": 0.895871781486988,
+      "reward": 0.895871781486988
+    },
+    "multi_turn_base_194": {
+      "success": 0.9076875558839383,
+      "reward": 0.9076875558839383
+    },
+    "multi_turn_base_124": {
+      "success": 0.7681966570597599,
+      "reward": 0.7681966570597599
+    },
+    "multi_turn_base_118": {
+      "success": 0.7923226074763393,
+      "reward": 0.7923226074763393
+    },
+    "multi_turn_base_186": {
+      "success": 0.7747937899955534,
+      "reward": 0.7747937899955534
+    },
+    "multi_turn_base_13": {
+      "success": 0.7347163032588353,
+      "reward": 0.7347163032588353
+    },
+    "multi_turn_base_142": {
+      "success": 0.8850499133311793,
+      "reward": 0.8850499133311793
+    },
+    "multi_turn_base_20": {
+      "success": 0.8053991540347689,
+      "reward": 0.8053991540347689
+    },
+    "multi_turn_base_136": {
+      "success": 0.772458870376567,
+      "reward": 0.772458870376567
+    },
+    "multi_turn_base_141": {
+      "success": 0.8102412357484552,
+      "reward": 0.8102412357484552
+    },
+    "multi_turn_base_185": {
+      "success": 0.7342136683720661,
+      "reward": 0.7342136683720661
+    },
+    "multi_turn_base_34": {
+      "success": 0.8063560487717287,
+      "reward": 0.8063560487717287
+    },
+    "multi_turn_base_198": {
+      "success": 0.9014109416635266,
+      "reward": 0.9014109416635266
+    },
+    "multi_turn_base_61": {
+      "success": 0.8137247762209094,
+      "reward": 0.8137247762209094
+    },
+    "multi_turn_base_101": {
+      "success": 0.8297624374809122,
+      "reward": 0.8297624374809122
+    },
+    "multi_turn_base_16": {
+      "success": 0.7953635751724624,
+      "reward": 0.7953635751724624
+    },
+    "multi_turn_base_96": {
+      "success": 0.7282065096609774,
+      "reward": 0.7282065096609774
+    },
+    "multi_turn_base_87": {
+      "success": 0.9086336159865915,
+      "reward": 0.9086336159865915
+    },
+    "multi_turn_base_175": {
+      "success": 0.8509679277546163,
+      "reward": 0.8509679277546163
+    },
+    "multi_turn_base_149": {
+      "success": 0.8028285912244647,
+      "reward": 0.8028285912244647
+    },
+    "multi_turn_base_25": {
+      "success": 0.848365640744652,
+      "reward": 0.848365640744652
+    },
+    "multi_turn_base_52": {
+      "success": 0.8273295279655907,
+      "reward": 0.8273295279655907
+    },
+    "multi_turn_base_65": {
+      "success": 0.8245023116992093,
+      "reward": 0.8245023116992093
+    },
+    "multi_turn_base_41": {
+      "success": 0.8579236838170149,
+      "reward": 0.8579236838170149
+    },
+    "multi_turn_base_28": {
+      "success": 0.7398178196837701,
+      "reward": 0.7398178196837701
+    },
+    "multi_turn_base_37": {
+      "success": 0.7452969889960477,
+      "reward": 0.7452969889960477
+    },
+    "multi_turn_base_79": {
+      "success": 0.7837212008386201,
+      "reward": 0.7837212008386201
+    },
+    "multi_turn_base_181": {
+      "success": 0.8651300893316813,
+      "reward": 0.8651300893316813
+    },
+    "multi_turn_base_30": {
+      "success": 0.789507179099486,
+      "reward": 0.789507179099486
+    },
+    "multi_turn_base_187": {
+      "success": 0.8395230276136479,
+      "reward": 0.8395230276136479
+    },
+    "multi_turn_base_91": {
+      "success": 0.8930970641535466,
+      "reward": 0.8930970641535466
+    },
+    "multi_turn_base_24": {
+      "success": 0.90823967757361,
+      "reward": 0.90823967757361
+    },
+    "multi_turn_base_116": {
+      "success": 0.8216537050021937,
+      "reward": 0.8216537050021937
+    },
+    "multi_turn_base_106": {
+      "success": 0.7781513968431742,
+      "reward": 0.7781513968431742
+    },
+    "multi_turn_base_6": {
+      "success": 0.7595315791572285,
+      "reward": 0.7595315791572285
+    },
+    "multi_turn_base_121": {
+      "success": 0.8133466511995873,
+      "reward": 0.8133466511995873
+    },
+    "multi_turn_base_127": {
+      "success": 0.8287535415563624,
+      "reward": 0.8287535415563624
+    },
+    "multi_turn_base_40": {
+      "success": 0.7857607894543932,
+      "reward": 0.7857607894543932
+    },
+    "multi_turn_base_12": {
+      "success": 0.7892321778901927,
+      "reward": 0.7892321778901927
+    },
+    "multi_turn_base_189": {
+      "success": 0.8734309854156875,
+      "reward": 0.8734309854156875
+    },
+    "multi_turn_base_196": {
+      "success": 0.7272751553280453,
+      "reward": 0.7272751553280453
+    },
+    "multi_turn_base_1": {
+      "success": 0.7856492325630153,
+      "reward": 0.7856492325630153
+    },
+    "multi_turn_base_182": {
+      "success": 0.7949935714236911,
+      "reward": 0.7949935714236911
+    },
+    "multi_turn_base_48": {
+      "success": 0.8960729908887466,
+      "reward": 0.8960729908887466
+    },
+    "multi_turn_base_114": {
+      "success": 0.8207049485344218,
+      "reward": 0.8207049485344218
+    },
+    "multi_turn_base_130": {
+      "success": 0.9079722909042547,
+      "reward": 0.9079722909042547
+    },
+    "multi_turn_base_2": {
+      "success": 0.761462660124866,
+      "reward": 0.761462660124866
+    },
+    "multi_turn_base_11": {
+      "success": 0.8598997847316553,
+      "reward": 0.8598997847316553
+    },
+    "multi_turn_base_85": {
+      "success": 0.7976059913164019,
+      "reward": 0.7976059913164019
+    },
+    "multi_turn_base_78": {
+      "success": 0.7832727672958916,
+      "reward": 0.7832727672958916
+    },
+    "multi_turn_base_98": {
+      "success": 0.9082433500579193,
+      "reward": 0.9082433500579193
+    },
+    "multi_turn_base_57": {
+      "success": 0.8565073866994369,
+      "reward": 0.8565073866994369
+    },
+    "multi_turn_base_190": {
+      "success": 0.8978176222410559,
+      "reward": 0.8978176222410559
+    },
+    "multi_turn_base_90": {
+      "success": 0.7550978132884711,
+      "reward": 0.7550978132884711
+    },
+    "multi_turn_base_166": {
+      "success": 0.7760554387178401,
+      "reward": 0.7760554387178401
+    },
+    "multi_turn_base_144": {
+      "success": 0.8883218388278786,
+      "reward": 0.8883218388278786
+    },
+    "multi_turn_base_95": {
+      "success": 0.7207313612384562,
+      "reward": 0.7207313612384562
+    },
+    "multi_turn_base_192": {
+      "success": 0.7759469618033494,
+      "reward": 0.7759469618033494
+    },
+    "multi_turn_base_199": {
+      "success": 0.8749715523503189,
+      "reward": 0.8749715523503189
+    },
+    "multi_turn_base_27": {
+      "success": 0.8163945689369911,
+      "reward": 0.8163945689369911
+    },
+    "multi_turn_base_14": {
+      "success": 0.7981745405584049,
+      "reward": 0.7981745405584049
+    },
+    "multi_turn_base_111": {
+      "success": 0.8513881354712387,
+      "reward": 0.8513881354712387
+    },
+    "multi_turn_base_139": {
+      "success": 0.8339026743625063,
+      "reward": 0.8339026743625063
+    },
+    "multi_turn_base_44": {
+      "success": 0.8899294486944399,
+      "reward": 0.8899294486944399
+    },
+    "multi_turn_base_102": {
+      "success": 0.8176815381314795,
+      "reward": 0.8176815381314795
+    },
+    "multi_turn_base_60": {
+      "success": 0.7872570491831882,
+      "reward": 0.7872570491831882
+    },
+    "multi_turn_base_9": {
+      "success": 0.7355720819755391,
+      "reward": 0.7355720819755391
+    },
+    "multi_turn_base_69": {
+      "success": 0.8012213428507609,
+      "reward": 0.8012213428507609
+    },
+    "multi_turn_base_3": {
+      "success": 0.8795135946663826,
+      "reward": 0.8795135946663826
+    },
+    "multi_turn_base_75": {
+      "success": 0.7863554010135949,
+      "reward": 0.7863554010135949
+    },
+    "multi_turn_base_49": {
+      "success": 0.8104338987289075,
+      "reward": 0.8104338987289075
+    },
+    "multi_turn_base_84": {
+      "success": 0.7846476937608439,
+      "reward": 0.7846476937608439
+    },
+    "multi_turn_base_131": {
+      "success": 0.8472473237307852,
+      "reward": 0.8472473237307852
+    },
+    "multi_turn_base_129": {
+      "success": 0.8144643494893015,
+      "reward": 0.8144643494893015
+    },
+    "multi_turn_base_32": {
+      "success": 0.8198955162008981,
+      "reward": 0.8198955162008981
+    },
+    "multi_turn_base_180": {
+      "success": 0.8013916539031527,
+      "reward": 0.8013916539031527
+    },
+    "multi_turn_base_83": {
+      "success": 0.9025043881271277,
+      "reward": 0.9025043881271277
+    },
+    "multi_turn_base_138": {
+      "success": 0.7477733301342868,
+      "reward": 0.7477733301342868
+    },
+    "multi_turn_base_100": {
+      "success": 0.8560654742773774,
+      "reward": 0.8560654742773774
+    },
+    "multi_turn_base_162": {
+      "success": 0.8859852771940606,
+      "reward": 0.8859852771940606
+    },
+    "multi_turn_base_68": {
+      "success": 0.902836378780854,
+      "reward": 0.902836378780854
+    },
+    "multi_turn_base_126": {
+      "success": 0.8996255639241136,
+      "reward": 0.8996255639241136
+    },
+    "multi_turn_base_115": {
+      "success": 0.8286879830129183,
+      "reward": 0.8286879830129183
+    },
+    "multi_turn_base_178": {
+      "success": 0.8070720686128064,
+      "reward": 0.8070720686128064
+    },
+    "multi_turn_base_157": {
+      "success": 0.8198025794280233,
+      "reward": 0.8198025794280233
+    },
+    "multi_turn_base_110": {
+      "success": 0.8791584829518474,
+      "reward": 0.8791584829518474
+    },
+    "multi_turn_base_153": {
+      "success": 0.902467064536751,
+      "reward": 0.902467064536751
+    },
+    "multi_turn_base_23": {
+      "success": 0.7501238328754258,
+      "reward": 0.7501238328754258
+    },
+    "multi_turn_base_88": {
+      "success": 0.8016201464463072,
+      "reward": 0.8016201464463072
+    },
+    "multi_turn_base_55": {
+      "success": 0.7362769755852122,
+      "reward": 0.7362769755852122
+    },
+    "multi_turn_base_154": {
+      "success": 0.765944015413044,
+      "reward": 0.765944015413044
+    },
+    "multi_turn_base_82": {
+      "success": 0.7638462030244633,
+      "reward": 0.7638462030244633
+    },
+    "multi_turn_base_135": {
+      "success": 0.9121282371022106,
+      "reward": 0.9121282371022106
+    },
+    "multi_turn_base_188": {
+      "success": 0.9110847329048171,
+      "reward": 0.9110847329048171
+    },
+    "multi_turn_base_105": {
+      "success": 0.74237853105701,
+      "reward": 0.74237853105701
+    },
+    "multi_turn_miss_func_86": {
+      "success": 0.46295968238566065,
+      "reward": 0.46295968238566065
+    },
+    "multi_turn_miss_func_121": {
+      "success": 0.586475946785993,
+      "reward": 0.586475946785993
+    },
+    "multi_turn_miss_func_77": {
+      "success": 0.47030560565653856,
+      "reward": 0.47030560565653856
+    },
+    "multi_turn_miss_func_10": {
+      "success": 0.4560116811669459,
+      "reward": 0.4560116811669459
+    },
+    "multi_turn_miss_func_162": {
+      "success": 0.47072072434721535,
+      "reward": 0.47072072434721535
+    },
+    "multi_turn_miss_func_111": {
+      "success": 0.46554916780804034,
+      "reward": 0.46554916780804034
+    },
+    "multi_turn_miss_func_148": {
+      "success": 0.5045204457953854,
+      "reward": 0.5045204457953854
+    },
+    "multi_turn_miss_func_153": {
+      "success": 0.5280985105964585,
+      "reward": 0.5280985105964585
+    },
+    "multi_turn_miss_func_141": {
+      "success": 0.5154707156739828,
+      "reward": 0.5154707156739828
+    },
+    "multi_turn_miss_func_155": {
+      "success": 0.6140165745662565,
+      "reward": 0.6140165745662565
+    },
+    "multi_turn_miss_func_60": {
+      "success": 0.4822179575060071,
+      "reward": 0.4822179575060071
+    },
+    "multi_turn_miss_func_140": {
+      "success": 0.5452602447698034,
+      "reward": 0.5452602447698034
+    },
+    "multi_turn_miss_func_102": {
+      "success": 0.535083867210216,
+      "reward": 0.535083867210216
+    },
+    "multi_turn_miss_func_67": {
+      "success": 0.48089206037830845,
+      "reward": 0.48089206037830845
+    },
+    "multi_turn_miss_func_61": {
+      "success": 0.5880307618384322,
+      "reward": 0.5880307618384322
+    },
+    "multi_turn_miss_func_194": {
+      "success": 0.49351886982180154,
+      "reward": 0.49351886982180154
+    },
+    "multi_turn_miss_func_169": {
+      "success": 0.45862199892490685,
+      "reward": 0.45862199892490685
+    },
+    "multi_turn_miss_func_191": {
+      "success": 0.6078632296896221,
+      "reward": 0.6078632296896221
+    },
+    "multi_turn_miss_func_4": {
+      "success": 0.5111419983350537,
+      "reward": 0.5111419983350537
+    },
+    "multi_turn_miss_func_45": {
+      "success": 0.46742465752582646,
+      "reward": 0.46742465752582646
+    },
+    "multi_turn_miss_func_136": {
+      "success": 0.4564008507892492,
+      "reward": 0.4564008507892492
+    },
+    "multi_turn_miss_func_176": {
+      "success": 0.6339170604441122,
+      "reward": 0.6339170604441122
+    },
+    "multi_turn_miss_func_40": {
+      "success": 0.4904539710470601,
+      "reward": 0.4904539710470601
+    },
+    "multi_turn_miss_func_182": {
+      "success": 0.5261197778573539,
+      "reward": 0.5261197778573539
+    },
+    "multi_turn_miss_func_64": {
+      "success": 0.631028785272741,
+      "reward": 0.631028785272741
+    },
+    "multi_turn_miss_func_87": {
+      "success": 0.5909550285760675,
+      "reward": 0.5909550285760675
+    },
+    "multi_turn_miss_func_6": {
+      "success": 0.5621292636059526,
+      "reward": 0.5621292636059526
+    },
+    "multi_turn_miss_func_82": {
+      "success": 0.535047821440978,
+      "reward": 0.535047821440978
+    },
+    "multi_turn_miss_func_107": {
+      "success": 0.5211657207159246,
+      "reward": 0.5211657207159246
+    },
+    "multi_turn_miss_func_96": {
+      "success": 0.5921716132532274,
+      "reward": 0.5921716132532274
+    },
+    "multi_turn_miss_func_73": {
+      "success": 0.5996009918743748,
+      "reward": 0.5996009918743748
+    },
+    "multi_turn_miss_func_134": {
+      "success": 0.4743881783504943,
+      "reward": 0.4743881783504943
+    },
+    "multi_turn_miss_func_14": {
+      "success": 0.6025531626661665,
+      "reward": 0.6025531626661665
+    },
+    "multi_turn_miss_func_186": {
+      "success": 0.628414949583452,
+      "reward": 0.628414949583452
+    },
+    "multi_turn_miss_func_25": {
+      "success": 0.647855581808336,
+      "reward": 0.647855581808336
+    },
+    "multi_turn_miss_func_187": {
+      "success": 0.4794228023452272,
+      "reward": 0.4794228023452272
+    },
+    "multi_turn_miss_func_103": {
+      "success": 0.46767932768391435,
+      "reward": 0.46767932768391435
+    },
+    "multi_turn_miss_func_117": {
+      "success": 0.4549783256847827,
+      "reward": 0.4549783256847827
+    },
+    "multi_turn_miss_func_113": {
+      "success": 0.5579777286173725,
+      "reward": 0.5579777286173725
+    },
+    "multi_turn_miss_func_109": {
+      "success": 0.4729832144507634,
+      "reward": 0.4729832144507634
+    },
+    "multi_turn_miss_func_129": {
+      "success": 0.5651113552309367,
+      "reward": 0.5651113552309367
+    },
+    "multi_turn_miss_func_168": {
+      "success": 0.5731182017184604,
+      "reward": 0.5731182017184604
+    },
+    "multi_turn_miss_func_85": {
+      "success": 0.49851636375498876,
+      "reward": 0.49851636375498876
+    },
+    "multi_turn_miss_func_157": {
+      "success": 0.480513241521668,
+      "reward": 0.480513241521668
+    },
+    "multi_turn_miss_func_98": {
+      "success": 0.5887965408942655,
+      "reward": 0.5887965408942655
+    },
+    "multi_turn_miss_func_152": {
+      "success": 0.556297568070306,
+      "reward": 0.556297568070306
+    },
+    "multi_turn_miss_func_1": {
+      "success": 0.4733257609939496,
+      "reward": 0.4733257609939496
+    },
+    "multi_turn_miss_func_100": {
+      "success": 0.6026427002513416,
+      "reward": 0.6026427002513416
+    },
+    "multi_turn_miss_func_125": {
+      "success": 0.5431021702226956,
+      "reward": 0.5431021702226956
+    },
+    "multi_turn_miss_func_164": {
+      "success": 0.47637516204881836,
+      "reward": 0.47637516204881836
+    },
+    "multi_turn_miss_func_44": {
+      "success": 0.49195056498096107,
+      "reward": 0.49195056498096107
+    },
+    "multi_turn_miss_func_68": {
+      "success": 0.6175045162363687,
+      "reward": 0.6175045162363687
+    },
+    "multi_turn_miss_func_74": {
+      "success": 0.49485272063055374,
+      "reward": 0.49485272063055374
+    },
+    "multi_turn_miss_func_178": {
+      "success": 0.6106720942446665,
+      "reward": 0.6106720942446665
+    },
+    "multi_turn_miss_func_56": {
+      "success": 0.5685434623431749,
+      "reward": 0.5685434623431749
+    },
+    "multi_turn_miss_func_38": {
+      "success": 0.5794589640874088,
+      "reward": 0.5794589640874088
+    },
+    "multi_turn_miss_func_76": {
+      "success": 0.4567461368643554,
+      "reward": 0.4567461368643554
+    },
+    "multi_turn_miss_func_195": {
+      "success": 0.49083998804931533,
+      "reward": 0.49083998804931533
+    },
+    "multi_turn_miss_func_30": {
+      "success": 0.5833903224052374,
+      "reward": 0.5833903224052374
+    },
+    "multi_turn_miss_func_93": {
+      "success": 0.5509778060719785,
+      "reward": 0.5509778060719785
+    },
+    "multi_turn_miss_func_180": {
+      "success": 0.5498086907667594,
+      "reward": 0.5498086907667594
+    },
+    "multi_turn_miss_func_130": {
+      "success": 0.5873989114392081,
+      "reward": 0.5873989114392081
+    },
+    "multi_turn_miss_func_166": {
+      "success": 0.6067982021618631,
+      "reward": 0.6067982021618631
+    },
+    "multi_turn_miss_func_112": {
+      "success": 0.4575896026118635,
+      "reward": 0.4575896026118635
+    },
+    "multi_turn_miss_func_118": {
+      "success": 0.49466390755136125,
+      "reward": 0.49466390755136125
+    },
+    "multi_turn_miss_func_126": {
+      "success": 0.558445423540763,
+      "reward": 0.558445423540763
+    },
+    "multi_turn_miss_func_34": {
+      "success": 0.4999669910059234,
+      "reward": 0.4999669910059234
+    },
+    "multi_turn_miss_func_101": {
+      "success": 0.5560868832529725,
+      "reward": 0.5560868832529725
+    },
+    "multi_turn_miss_func_24": {
+      "success": 0.5504790936830638,
+      "reward": 0.5504790936830638
+    },
+    "multi_turn_miss_func_151": {
+      "success": 0.4820817676447523,
+      "reward": 0.4820817676447523
+    },
+    "multi_turn_miss_func_52": {
+      "success": 0.6062411410166513,
+      "reward": 0.6062411410166513
+    },
+    "multi_turn_miss_func_145": {
+      "success": 0.5480630606175547,
+      "reward": 0.5480630606175547
+    },
+    "multi_turn_miss_func_12": {
+      "success": 0.4699568273080413,
+      "reward": 0.4699568273080413
+    },
+    "multi_turn_miss_func_167": {
+      "success": 0.6192703660505988,
+      "reward": 0.6192703660505988
+    },
+    "multi_turn_miss_func_192": {
+      "success": 0.6400161904259623,
+      "reward": 0.6400161904259623
+    },
+    "multi_turn_miss_func_42": {
+      "success": 0.45039396928632497,
+      "reward": 0.45039396928632497
+    },
+    "multi_turn_miss_func_49": {
+      "success": 0.4855041537516528,
+      "reward": 0.4855041537516528
+    },
+    "multi_turn_miss_func_124": {
+      "success": 0.5985345668039599,
+      "reward": 0.5985345668039599
+    },
+    "multi_turn_miss_func_89": {
+      "success": 0.572756325342403,
+      "reward": 0.572756325342403
+    },
+    "multi_turn_miss_func_37": {
+      "success": 0.6447332956815915,
+      "reward": 0.6447332956815915
+    },
+    "multi_turn_miss_func_65": {
+      "success": 0.5817571253822551,
+      "reward": 0.5817571253822551
+    },
+    "multi_turn_miss_func_183": {
+      "success": 0.47448251564625715,
+      "reward": 0.47448251564625715
+    },
+    "multi_turn_miss_func_116": {
+      "success": 0.5315116867612842,
+      "reward": 0.5315116867612842
+    },
+    "multi_turn_miss_func_39": {
+      "success": 0.48991101687771993,
+      "reward": 0.48991101687771993
+    },
+    "multi_turn_miss_func_3": {
+      "success": 0.5075901462830581,
+      "reward": 0.5075901462830581
+    },
+    "multi_turn_miss_func_190": {
+      "success": 0.4903685773351157,
+      "reward": 0.4903685773351157
+    },
+    "multi_turn_miss_func_160": {
+      "success": 0.6397457559103485,
+      "reward": 0.6397457559103485
+    },
+    "multi_turn_miss_func_105": {
+      "success": 0.5016339949918059,
+      "reward": 0.5016339949918059
+    },
+    "multi_turn_miss_func_122": {
+      "success": 0.4627178525581765,
+      "reward": 0.4627178525581765
+    },
+    "multi_turn_miss_func_147": {
+      "success": 0.5540318105146363,
+      "reward": 0.5540318105146363
+    },
+    "multi_turn_miss_func_46": {
+      "success": 0.5034205364187762,
+      "reward": 0.5034205364187762
+    },
+    "multi_turn_miss_func_175": {
+      "success": 0.5093026482638211,
+      "reward": 0.5093026482638211
+    },
+    "multi_turn_miss_func_72": {
+      "success": 0.5970577785156337,
+      "reward": 0.5970577785156337
+    },
+    "multi_turn_miss_func_78": {
+      "success": 0.6305059894408347,
+      "reward": 0.6305059894408347
+    },
+    "multi_turn_miss_func_51": {
+      "success": 0.5775335513352262,
+      "reward": 0.5775335513352262
+    },
+    "multi_turn_miss_func_70": {
+      "success": 0.5084378874531105,
+      "reward": 0.5084378874531105
+    },
+    "multi_turn_miss_func_156": {
+      "success": 0.5051150199154194,
+      "reward": 0.5051150199154194
+    },
+    "multi_turn_miss_func_33": {
+      "success": 0.45568238292021734,
+      "reward": 0.45568238292021734
+    },
+    "multi_turn_miss_func_99": {
+      "success": 0.5196617100550006,
+      "reward": 0.5196617100550006
+    },
+    "multi_turn_miss_func_27": {
+      "success": 0.49915444563356104,
+      "reward": 0.49915444563356104
+    },
+    "multi_turn_miss_param_30": {
+      "success": 0.5524667797266661,
+      "reward": 0.5524667797266661
+    },
+    "multi_turn_miss_param_49": {
+      "success": 0.6982780657704636,
+      "reward": 0.6982780657704636
+    },
+    "multi_turn_miss_param_167": {
+      "success": 0.5690098366395128,
+      "reward": 0.5690098366395128
+    },
+    "multi_turn_miss_param_79": {
+      "success": 0.682844169107928,
+      "reward": 0.682844169107928
+    },
+    "multi_turn_miss_param_57": {
+      "success": 0.5762152265934775,
+      "reward": 0.5762152265934775
+    },
+    "multi_turn_miss_param_169": {
+      "success": 0.6592312262764273,
+      "reward": 0.6592312262764273
+    },
+    "multi_turn_miss_param_94": {
+      "success": 0.6604744866398337,
+      "reward": 0.6604744866398337
+    },
+    "multi_turn_miss_param_54": {
+      "success": 0.5468092761577128,
+      "reward": 0.5468092761577128
+    },
+    "multi_turn_miss_param_145": {
+      "success": 0.6021410573511713,
+      "reward": 0.6021410573511713
+    },
+    "multi_turn_miss_param_95": {
+      "success": 0.6925552226120036,
+      "reward": 0.6925552226120036
+    },
+    "multi_turn_miss_param_120": {
+      "success": 0.5775493479048716,
+      "reward": 0.5775493479048716
+    },
+    "multi_turn_miss_param_32": {
+      "success": 0.6926924669166776,
+      "reward": 0.6926924669166776
+    },
+    "multi_turn_miss_param_173": {
+      "success": 0.6611777252892912,
+      "reward": 0.6611777252892912
+    },
+    "multi_turn_miss_param_82": {
+      "success": 0.6077517862682584,
+      "reward": 0.6077517862682584
+    },
+    "multi_turn_miss_param_140": {
+      "success": 0.6287057705988888,
+      "reward": 0.6287057705988888
+    },
+    "multi_turn_miss_param_89": {
+      "success": 0.6081172283059258,
+      "reward": 0.6081172283059258
+    },
+    "multi_turn_miss_param_71": {
+      "success": 0.5204899562104814,
+      "reward": 0.5204899562104814
+    },
+    "multi_turn_miss_param_143": {
+      "success": 0.5056423090411448,
+      "reward": 0.5056423090411448
+    },
+    "multi_turn_miss_param_27": {
+      "success": 0.6484269528529669,
+      "reward": 0.6484269528529669
+    },
+    "multi_turn_miss_param_69": {
+      "success": 0.501793419802979,
+      "reward": 0.501793419802979
+    },
+    "multi_turn_miss_param_176": {
+      "success": 0.555506038678695,
+      "reward": 0.555506038678695
+    },
+    "multi_turn_miss_param_80": {
+      "success": 0.5920863967137612,
+      "reward": 0.5920863967137612
+    },
+    "multi_turn_miss_param_37": {
+      "success": 0.699903641780816,
+      "reward": 0.699903641780816
+    },
+    "multi_turn_miss_param_77": {
+      "success": 0.6628910564265426,
+      "reward": 0.6628910564265426
+    },
+    "multi_turn_miss_param_72": {
+      "success": 0.5216773028535948,
+      "reward": 0.5216773028535948
+    },
+    "multi_turn_miss_param_129": {
+      "success": 0.5293349254013353,
+      "reward": 0.5293349254013353
+    },
+    "multi_turn_miss_param_48": {
+      "success": 0.6636503533841228,
+      "reward": 0.6636503533841228
+    },
+    "multi_turn_miss_param_50": {
+      "success": 0.6141922000595815,
+      "reward": 0.6141922000595815
+    },
+    "multi_turn_miss_param_73": {
+      "success": 0.5911944633562105,
+      "reward": 0.5911944633562105
+    },
+    "multi_turn_miss_param_196": {
+      "success": 0.6138173913848161,
+      "reward": 0.6138173913848161
+    },
+    "multi_turn_miss_param_159": {
+      "success": 0.6710445116672302,
+      "reward": 0.6710445116672302
+    },
+    "multi_turn_miss_param_11": {
+      "success": 0.5829936046346541,
+      "reward": 0.5829936046346541
+    },
+    "multi_turn_miss_param_74": {
+      "success": 0.6841035687327626,
+      "reward": 0.6841035687327626
+    },
+    "multi_turn_miss_param_116": {
+      "success": 0.5344491501418988,
+      "reward": 0.5344491501418988
+    },
+    "multi_turn_miss_param_13": {
+      "success": 0.6414716410314365,
+      "reward": 0.6414716410314365
+    },
+    "multi_turn_miss_param_158": {
+      "success": 0.5154735401774462,
+      "reward": 0.5154735401774462
+    },
+    "multi_turn_miss_param_100": {
+      "success": 0.5220691102142606,
+      "reward": 0.5220691102142606
+    },
+    "multi_turn_miss_param_40": {
+      "success": 0.6714696284317108,
+      "reward": 0.6714696284317108
+    },
+    "multi_turn_miss_param_160": {
+      "success": 0.6611142164005698,
+      "reward": 0.6611142164005698
+    },
+    "multi_turn_miss_param_137": {
+      "success": 0.5750886810652652,
+      "reward": 0.5750886810652652
+    },
+    "multi_turn_miss_param_199": {
+      "success": 0.5470812964828409,
+      "reward": 0.5470812964828409
+    },
+    "multi_turn_miss_param_164": {
+      "success": 0.5401009446569022,
+      "reward": 0.5401009446569022
+    },
+    "multi_turn_miss_param_190": {
+      "success": 0.6453462097666567,
+      "reward": 0.6453462097666567
+    },
+    "multi_turn_miss_param_85": {
+      "success": 0.5810045558216527,
+      "reward": 0.5810045558216527
+    },
+    "multi_turn_miss_param_20": {
+      "success": 0.5786491043117477,
+      "reward": 0.5786491043117477
+    },
+    "multi_turn_miss_param_142": {
+      "success": 0.5211989495021289,
+      "reward": 0.5211989495021289
+    },
+    "multi_turn_miss_param_64": {
+      "success": 0.6944401606904436,
+      "reward": 0.6944401606904436
+    },
+    "multi_turn_miss_param_170": {
+      "success": 0.6599771811068005,
+      "reward": 0.6599771811068005
+    },
+    "multi_turn_miss_param_127": {
+      "success": 0.5217003929479281,
+      "reward": 0.5217003929479281
+    },
+    "multi_turn_miss_param_183": {
+      "success": 0.6976073420135321,
+      "reward": 0.6976073420135321
+    },
+    "multi_turn_miss_param_55": {
+      "success": 0.6531954746118735,
+      "reward": 0.6531954746118735
+    },
+    "multi_turn_miss_param_121": {
+      "success": 0.6961435333351007,
+      "reward": 0.6961435333351007
+    },
+    "multi_turn_miss_param_4": {
+      "success": 0.5062129065874528,
+      "reward": 0.5062129065874528
+    },
+    "multi_turn_miss_param_101": {
+      "success": 0.5423297774145216,
+      "reward": 0.5423297774145216
+    },
+    "multi_turn_miss_param_38": {
+      "success": 0.670676133402315,
+      "reward": 0.670676133402315
+    },
+    "multi_turn_miss_param_131": {
+      "success": 0.5631338786480794,
+      "reward": 0.5631338786480794
+    },
+    "multi_turn_miss_param_186": {
+      "success": 0.562643063036409,
+      "reward": 0.562643063036409
+    },
+    "multi_turn_miss_param_83": {
+      "success": 0.6572765498788274,
+      "reward": 0.6572765498788274
+    },
+    "multi_turn_miss_param_31": {
+      "success": 0.5206140411600038,
+      "reward": 0.5206140411600038
+    },
+    "multi_turn_miss_param_5": {
+      "success": 0.659090408254203,
+      "reward": 0.659090408254203
+    },
+    "multi_turn_miss_param_125": {
+      "success": 0.6901502734958544,
+      "reward": 0.6901502734958544
+    },
+    "multi_turn_miss_param_88": {
+      "success": 0.6037247855457768,
+      "reward": 0.6037247855457768
+    },
+    "multi_turn_miss_param_47": {
+      "success": 0.6598816318344048,
+      "reward": 0.6598816318344048
+    },
+    "multi_turn_miss_param_109": {
+      "success": 0.638269077273614,
+      "reward": 0.638269077273614
+    },
+    "multi_turn_miss_param_144": {
+      "success": 0.6841305485889619,
+      "reward": 0.6841305485889619
+    },
+    "multi_turn_miss_param_66": {
+      "success": 0.5527442626777906,
+      "reward": 0.5527442626777906
+    },
+    "multi_turn_miss_param_126": {
+      "success": 0.6243459634306715,
+      "reward": 0.6243459634306715
+    },
+    "multi_turn_miss_param_24": {
+      "success": 0.6695106357730717,
+      "reward": 0.6695106357730717
+    },
+    "multi_turn_miss_param_152": {
+      "success": 0.622378356317612,
+      "reward": 0.622378356317612
+    },
+    "multi_turn_miss_param_65": {
+      "success": 0.6605452855025756,
+      "reward": 0.6605452855025756
+    },
+    "multi_turn_miss_param_117": {
+      "success": 0.5084073589668626,
+      "reward": 0.5084073589668626
+    },
+    "multi_turn_miss_param_17": {
+      "success": 0.6728609612148397,
+      "reward": 0.6728609612148397
+    },
+    "multi_turn_miss_param_46": {
+      "success": 0.6154871903163118,
+      "reward": 0.6154871903163118
+    },
+    "multi_turn_miss_param_0": {
+      "success": 0.5133039863811116,
+      "reward": 0.5133039863811116
+    },
+    "multi_turn_miss_param_93": {
+      "success": 0.5866221226953487,
+      "reward": 0.5866221226953487
+    },
+    "multi_turn_miss_param_181": {
+      "success": 0.6851704317110522,
+      "reward": 0.6851704317110522
+    },
+    "multi_turn_miss_param_153": {
+      "success": 0.5974491776194072,
+      "reward": 0.5974491776194072
+    },
+    "multi_turn_miss_param_185": {
+      "success": 0.6919998344480991,
+      "reward": 0.6919998344480991
+    },
+    "multi_turn_miss_param_123": {
+      "success": 0.6216321304258033,
+      "reward": 0.6216321304258033
+    },
+    "multi_turn_miss_param_150": {
+      "success": 0.6029536601861365,
+      "reward": 0.6029536601861365
+    },
+    "multi_turn_miss_param_175": {
+      "success": 0.6095605448609126,
+      "reward": 0.6095605448609126
+    },
+    "multi_turn_miss_param_136": {
+      "success": 0.5370744271755857,
+      "reward": 0.5370744271755857
+    },
+    "multi_turn_miss_param_53": {
+      "success": 0.6662219852130445,
+      "reward": 0.6662219852130445
+    },
+    "multi_turn_miss_param_108": {
+      "success": 0.5840075285835209,
+      "reward": 0.5840075285835209
+    },
+    "multi_turn_miss_param_111": {
+      "success": 0.5191500159490737,
+      "reward": 0.5191500159490737
+    },
+    "multi_turn_miss_param_70": {
+      "success": 0.5441386858104119,
+      "reward": 0.5441386858104119
+    },
+    "multi_turn_miss_param_155": {
+      "success": 0.6434440007767277,
+      "reward": 0.6434440007767277
+    },
+    "multi_turn_miss_param_28": {
+      "success": 0.546523408509447,
+      "reward": 0.546523408509447
+    },
+    "multi_turn_miss_param_171": {
+      "success": 0.5952001687360927,
+      "reward": 0.5952001687360927
+    },
+    "multi_turn_miss_param_19": {
+      "success": 0.5835401871901797,
+      "reward": 0.5835401871901797
+    },
+    "multi_turn_miss_param_146": {
+      "success": 0.6783614984663113,
+      "reward": 0.6783614984663113
+    },
+    "multi_turn_miss_param_10": {
+      "success": 0.5495032136909438,
+      "reward": 0.5495032136909438
+    },
+    "multi_turn_miss_param_192": {
+      "success": 0.5686128209970456,
+      "reward": 0.5686128209970456
+    },
+    "multi_turn_miss_param_135": {
+      "success": 0.6918895238060246,
+      "reward": 0.6918895238060246
+    },
+    "multi_turn_miss_param_56": {
+      "success": 0.5822908398886888,
+      "reward": 0.5822908398886888
+    },
+    "multi_turn_miss_param_128": {
+      "success": 0.6567072576276742,
+      "reward": 0.6567072576276742
+    },
+    "multi_turn_miss_param_102": {
+      "success": 0.5647361601853594,
+      "reward": 0.5647361601853594
+    },
+    "multi_turn_miss_param_118": {
+      "success": 0.5835759562169145,
+      "reward": 0.5835759562169145
+    },
+    "multi_turn_miss_param_165": {
+      "success": 0.641899446663889,
+      "reward": 0.641899446663889
+    },
+    "multi_turn_miss_param_178": {
+      "success": 0.5661594203827343,
+      "reward": 0.5661594203827343
+    },
+    "multi_turn_long_context_96": {
+      "success": 0.6903624329460697,
+      "reward": 0.6903624329460697
+    },
+    "multi_turn_long_context_169": {
+      "success": 0.7111843885647097,
+      "reward": 0.7111843885647097
+    },
+    "multi_turn_long_context_135": {
+      "success": 0.6975563695415752,
+      "reward": 0.6975563695415752
+    },
+    "multi_turn_long_context_74": {
+      "success": 0.6071686138881297,
+      "reward": 0.6071686138881297
+    },
+    "multi_turn_long_context_174": {
+      "success": 0.6869465213937094,
+      "reward": 0.6869465213937094
+    },
+    "multi_turn_long_context_126": {
+      "success": 0.6640499562174198,
+      "reward": 0.6640499562174198
+    },
+    "multi_turn_long_context_145": {
+      "success": 0.6052163185563907,
+      "reward": 0.6052163185563907
+    },
+    "multi_turn_long_context_133": {
+      "success": 0.6324009252321908,
+      "reward": 0.6324009252321908
+    },
+    "multi_turn_long_context_129": {
+      "success": 0.7982193683269945,
+      "reward": 0.7982193683269945
+    },
+    "multi_turn_long_context_17": {
+      "success": 0.7355287024601196,
+      "reward": 0.7355287024601196
+    },
+    "multi_turn_long_context_77": {
+      "success": 0.6825986996019722,
+      "reward": 0.6825986996019722
+    },
+    "multi_turn_long_context_15": {
+      "success": 0.7044148815107566,
+      "reward": 0.7044148815107566
+    },
+    "multi_turn_long_context_10": {
+      "success": 0.7390579076341953,
+      "reward": 0.7390579076341953
+    },
+    "multi_turn_long_context_140": {
+      "success": 0.6893543997521872,
+      "reward": 0.6893543997521872
+    },
+    "multi_turn_long_context_27": {
+      "success": 0.6126208545203834,
+      "reward": 0.6126208545203834
+    },
+    "multi_turn_long_context_134": {
+      "success": 0.6868724937752989,
+      "reward": 0.6868724937752989
+    },
+    "multi_turn_long_context_29": {
+      "success": 0.7446971229148789,
+      "reward": 0.7446971229148789
+    },
+    "multi_turn_long_context_191": {
+      "success": 0.6895978528283531,
+      "reward": 0.6895978528283531
+    },
+    "multi_turn_long_context_7": {
+      "success": 0.645792303431265,
+      "reward": 0.645792303431265
+    },
+    "multi_turn_long_context_69": {
+      "success": 0.7731091382850681,
+      "reward": 0.7731091382850681
+    },
+    "multi_turn_long_context_127": {
+      "success": 0.6230854427495705,
+      "reward": 0.6230854427495705
+    },
+    "multi_turn_long_context_6": {
+      "success": 0.7054702531791921,
+      "reward": 0.7054702531791921
+    },
+    "multi_turn_long_context_125": {
+      "success": 0.7361160454657198,
+      "reward": 0.7361160454657198
+    },
+    "multi_turn_long_context_65": {
+      "success": 0.7642442885703045,
+      "reward": 0.7642442885703045
+    },
+    "multi_turn_long_context_104": {
+      "success": 0.6320584127754109,
+      "reward": 0.6320584127754109
+    },
+    "multi_turn_long_context_47": {
+      "success": 0.6972169018576891,
+      "reward": 0.6972169018576891
+    },
+    "multi_turn_long_context_89": {
+      "success": 0.7607386445069543,
+      "reward": 0.7607386445069543
+    },
+    "multi_turn_long_context_162": {
+      "success": 0.6939752961727732,
+      "reward": 0.6939752961727732
+    },
+    "multi_turn_long_context_28": {
+      "success": 0.7711390637725449,
+      "reward": 0.7711390637725449
+    },
+    "multi_turn_long_context_57": {
+      "success": 0.6323316370677975,
+      "reward": 0.6323316370677975
+    },
+    "multi_turn_long_context_56": {
+      "success": 0.6026825117884861,
+      "reward": 0.6026825117884861
+    },
+    "multi_turn_long_context_45": {
+      "success": 0.6970365344772665,
+      "reward": 0.6970365344772665
+    },
+    "multi_turn_long_context_85": {
+      "success": 0.7380238788523766,
+      "reward": 0.7380238788523766
+    },
+    "multi_turn_long_context_49": {
+      "success": 0.6434300848383991,
+      "reward": 0.6434300848383991
+    },
+    "multi_turn_long_context_173": {
+      "success": 0.7584672569666214,
+      "reward": 0.7584672569666214
+    },
+    "multi_turn_long_context_188": {
+      "success": 0.6276070355501974,
+      "reward": 0.6276070355501974
+    },
+    "multi_turn_long_context_33": {
+      "success": 0.696376840420155,
+      "reward": 0.696376840420155
+    },
+    "multi_turn_long_context_190": {
+      "success": 0.6097261116396929,
+      "reward": 0.6097261116396929
+    },
+    "multi_turn_long_context_54": {
+      "success": 0.6986927409886132,
+      "reward": 0.6986927409886132
+    },
+    "multi_turn_long_context_55": {
+      "success": 0.6999205648200401,
+      "reward": 0.6999205648200401
+    },
+    "multi_turn_long_context_106": {
+      "success": 0.628368018946696,
+      "reward": 0.628368018946696
+    },
+    "multi_turn_long_context_4": {
+      "success": 0.640038166111344,
+      "reward": 0.640038166111344
+    },
+    "multi_turn_long_context_139": {
+      "success": 0.7011470502477947,
+      "reward": 0.7011470502477947
+    },
+    "multi_turn_long_context_159": {
+      "success": 0.7117755938115938,
+      "reward": 0.7117755938115938
+    },
+    "multi_turn_long_context_53": {
+      "success": 0.7222259810013291,
+      "reward": 0.7222259810013291
+    },
+    "multi_turn_long_context_144": {
+      "success": 0.7826755263336644,
+      "reward": 0.7826755263336644
+    },
+    "multi_turn_long_context_72": {
+      "success": 0.7133926652170235,
+      "reward": 0.7133926652170235
+    },
+    "multi_turn_long_context_91": {
+      "success": 0.79045755099283,
+      "reward": 0.79045755099283
+    },
+    "multi_turn_long_context_37": {
+      "success": 0.6349141879554172,
+      "reward": 0.6349141879554172
+    },
+    "multi_turn_long_context_199": {
+      "success": 0.6463876718763233,
+      "reward": 0.6463876718763233
+    },
+    "multi_turn_long_context_180": {
+      "success": 0.7087713995270364,
+      "reward": 0.7087713995270364
+    },
+    "multi_turn_long_context_124": {
+      "success": 0.6094674375861574,
+      "reward": 0.6094674375861574
+    },
+    "multi_turn_long_context_170": {
+      "success": 0.7471116978551986,
+      "reward": 0.7471116978551986
+    },
+    "multi_turn_long_context_48": {
+      "success": 0.7646104960154301,
+      "reward": 0.7646104960154301
+    },
+    "multi_turn_long_context_146": {
+      "success": 0.6218612615535644,
+      "reward": 0.6218612615535644
+    },
+    "multi_turn_long_context_50": {
+      "success": 0.7734963411403578,
+      "reward": 0.7734963411403578
+    },
+    "multi_turn_long_context_8": {
+      "success": 0.6040639344146623,
+      "reward": 0.6040639344146623
+    },
+    "multi_turn_long_context_164": {
+      "success": 0.6458221842641527,
+      "reward": 0.6458221842641527
+    },
+    "multi_turn_long_context_196": {
+      "success": 0.6984816382402744,
+      "reward": 0.6984816382402744
+    },
+    "multi_turn_long_context_115": {
+      "success": 0.7979931497010386,
+      "reward": 0.7979931497010386
+    },
+    "multi_turn_long_context_150": {
+      "success": 0.7872847092773962,
+      "reward": 0.7872847092773962
+    },
+    "multi_turn_long_context_39": {
+      "success": 0.7502032216522384,
+      "reward": 0.7502032216522384
+    },
+    "multi_turn_long_context_197": {
+      "success": 0.6637347247134276,
+      "reward": 0.6637347247134276
+    },
+    "multi_turn_long_context_81": {
+      "success": 0.6547151559625555,
+      "reward": 0.6547151559625555
+    },
+    "multi_turn_long_context_195": {
+      "success": 0.7889728950776562,
+      "reward": 0.7889728950776562
+    },
+    "multi_turn_long_context_181": {
+      "success": 0.6888487670777479,
+      "reward": 0.6888487670777479
+    },
+    "multi_turn_long_context_97": {
+      "success": 0.7796414362219258,
+      "reward": 0.7796414362219258
+    },
+    "multi_turn_long_context_113": {
+      "success": 0.7699181102611865,
+      "reward": 0.7699181102611865
+    },
+    "multi_turn_long_context_184": {
+      "success": 0.6438300681868172,
+      "reward": 0.6438300681868172
+    },
+    "multi_turn_long_context_11": {
+      "success": 0.7248581464227424,
+      "reward": 0.7248581464227424
+    },
+    "multi_turn_long_context_94": {
+      "success": 0.7898393836780077,
+      "reward": 0.7898393836780077
+    },
+    "multi_turn_long_context_137": {
+      "success": 0.7945134668132554,
+      "reward": 0.7945134668132554
+    },
+    "multi_turn_long_context_111": {
+      "success": 0.6745093622884036,
+      "reward": 0.6745093622884036
+    },
+    "multi_turn_long_context_194": {
+      "success": 0.7098755123349547,
+      "reward": 0.7098755123349547
+    },
+    "multi_turn_long_context_156": {
+      "success": 0.6690084063608684,
+      "reward": 0.6690084063608684
+    },
+    "multi_turn_long_context_62": {
+      "success": 0.6337823918633587,
+      "reward": 0.6337823918633587
+    },
+    "multi_turn_long_context_78": {
+      "success": 0.6002888129093424,
+      "reward": 0.6002888129093424
+    },
+    "multi_turn_long_context_172": {
+      "success": 0.6751120590314064,
+      "reward": 0.6751120590314064
+    },
+    "multi_turn_long_context_171": {
+      "success": 0.7223302904335619,
+      "reward": 0.7223302904335619
+    },
+    "multi_turn_long_context_160": {
+      "success": 0.6281644676877568,
+      "reward": 0.6281644676877568
+    },
+    "multi_turn_long_context_178": {
+      "success": 0.6229425728374492,
+      "reward": 0.6229425728374492
+    },
+    "multi_turn_long_context_105": {
+      "success": 0.7166201921451417,
+      "reward": 0.7166201921451417
+    },
+    "multi_turn_long_context_93": {
+      "success": 0.700906010181854,
+      "reward": 0.700906010181854
+    },
+    "multi_turn_long_context_155": {
+      "success": 0.658826228524285,
+      "reward": 0.658826228524285
+    },
+    "multi_turn_long_context_193": {
+      "success": 0.6592349406004033,
+      "reward": 0.6592349406004033
+    },
+    "multi_turn_long_context_12": {
+      "success": 0.6428184382251506,
+      "reward": 0.6428184382251506
+    },
+    "multi_turn_long_context_167": {
+      "success": 0.7642877131151705,
+      "reward": 0.7642877131151705
+    },
+    "multi_turn_long_context_88": {
+      "success": 0.7233090193763628,
+      "reward": 0.7233090193763628
+    },
+    "multi_turn_long_context_102": {
+      "success": 0.6095157749041719,
+      "reward": 0.6095157749041719
+    },
+    "multi_turn_long_context_147": {
+      "success": 0.6296601273188507,
+      "reward": 0.6296601273188507
+    },
+    "multi_turn_long_context_143": {
+      "success": 0.7480810130825455,
+      "reward": 0.7480810130825455
+    },
+    "multi_turn_long_context_63": {
+      "success": 0.7371952554996114,
+      "reward": 0.7371952554996114
+    },
+    "multi_turn_long_context_198": {
+      "success": 0.6079769303109442,
+      "reward": 0.6079769303109442
+    },
+    "multi_turn_long_context_98": {
+      "success": 0.6377443069679998,
+      "reward": 0.6377443069679998
+    },
+    "multi_turn_long_context_80": {
+      "success": 0.7372759647055706,
+      "reward": 0.7372759647055706
+    },
+    "multi_turn_long_context_60": {
+      "success": 0.7355839130318685,
+      "reward": 0.7355839130318685
+    },
+    "multi_turn_long_context_41": {
+      "success": 0.6794973788036726,
+      "reward": 0.6794973788036726
+    },
+    "multi_turn_long_context_59": {
+      "success": 0.6591425702113524,
+      "reward": 0.6591425702113524
+    },
+    "multi_turn_long_context_138": {
+      "success": 0.6477933050244565,
+      "reward": 0.6477933050244565
+    },
+    "multi_turn_long_context_119": {
+      "success": 0.7729015726067362,
+      "reward": 0.7729015726067362
+    }
+  }
+}

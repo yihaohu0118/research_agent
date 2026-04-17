@@ -1,0 +1,82 @@
+# ---- Start Training for Diplomacy Game ----
+# conda activate agentevolver
+
+PROJECT_DIR="$(pwd)"
+CONFIG_PATH="$PROJECT_DIR/examples/game/diplomacy"
+TRAIN_TASKS_FILE="$PROJECT_DIR/games/diplomacy/train_tasks.parquet"
+VAL_TASKS_FILE="$PROJECT_DIR/games/diplomacy/train_tasks.parquet"
+current_time=$(date "+%Y%m%d_%H%M%S")
+log_file="log_diplomacy_train_${current_time}.log"
+
+
+python3 -m agentevolver.main_ppo \
+    --config-path="$PROJECT_DIR/examples/game/diplomacy" \
+    --config-name='config' \
+    trainer.experiment_name="diplomacy_qwen25-7b_train_england" \
+    trainer.project_name="diplomacy_game" \
+    trainer.nnodes=1 \
+    trainer.n_gpus_per_node=8 \
+    trainer.critic_warmup=0 \
+    trainer.logger="['console','swanlab']" \
+    trainer.save_freq=-1 \
+    trainer.test_freq=10 \
+    trainer.total_epochs=100 \
+    trainer.val_before_train=True \
+    trainer.validation_data_dir="experiments/diplomacy/diplomacy_qwen25-7b_train_england/validation_log" \
+    trainer.rollout_data_dir="experiments/diplomacy/diplomacy_qwen25-7b_train_england/rollout_log" \
+    data.train_files="$TRAIN_TASKS_FILE" \
+    data.val_files="$VAL_TASKS_FILE" \
+    data.train_batch_size=1 \
+    data.max_prompt_length=20480 \
+    data.max_response_length=4096 \
+    data.filter_overlong_prompts=True \
+    data.truncation='error' \
+    data.return_raw_chat=True \
+    data.val_batch_size=256 \
+    data.val_type="val" \
+    algorithm.adv_estimator=grpo \
+    algorithm.use_kl_in_reward=False \
+    actor_rollout_ref.model.path=Qwen/Qwen2.5-7B-Instruct \
+    actor_rollout_ref.model.use_remove_padding=True \
+    actor_rollout_ref.model.enable_gradient_checkpointing=True \
+    actor_rollout_ref.rollout.use_qwen3=False \
+    actor_rollout_ref.rollout.enable_request_id=False \
+    actor_rollout_ref.rollout.prompt_length=23532 \
+    actor_rollout_ref.rollout.response_length=2048 \
+    actor_rollout_ref.rollout.max_model_len=25580 \
+    actor_rollout_ref.rollout.temperature=0.9 \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
+    actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
+    actor_rollout_ref.rollout.name=vllm \
+    actor_rollout_ref.rollout.mode=async \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
+    actor_rollout_ref.rollout.n=32 \
+    actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=25580 \
+    actor_rollout_ref.rollout.max_env_worker=16 \
+    actor_rollout_ref.rollout.context_template="linear" \
+    actor_rollout_ref.rollout.context_template_train_sp_action=False \
+    actor_rollout_ref.rollout.max_env_len=4096 \
+    actor_rollout_ref.rollout.sparse=True \
+    actor_rollout_ref.rollout.val_kwargs.n=1 \
+    actor_rollout_ref.actor.off_cliprange_high=0.6 \
+    actor_rollout_ref.actor.optim.lr=1e-6 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=1 \
+    actor_rollout_ref.actor.use_kl_loss=True \
+    actor_rollout_ref.actor.kl_loss_coef=0.001 \
+    actor_rollout_ref.actor.kl_loss_type=low_var_kl \
+    actor_rollout_ref.actor.entropy_coeff=0 \
+    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=25580 \
+    actor_rollout_ref.actor.fsdp_config.param_offload=False \
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \
+    actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=25580 \
+    actor_rollout_ref.ref.fsdp_config.param_offload=True \
+    critic.ppo_max_token_len_per_gpu=25580 \
+    critic.forward_max_token_len_per_gpu=25580 \
+    task_manager.n=0 \
+    task_manager.mixture.use_original_tasks=True \
+    task_manager.mixture.synthetic_data_ratio=0.0 \
+    task_manager.mixture.shuffle=True \
+    attribution_driven_credit_assignment.enable=False \
+    2>&1 | tee "$log_file"
