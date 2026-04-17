@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# Run every top-level experiment config under examples/.
+# Run selected experiment configs under examples/ (not every YAML file).
+#
+# Suites:
+#   core     — AppWorld (basic, overall) + full BFCL ablation ladder
+#   appworld — basic + overall only
+#   bfcl     — BFCL baseline + ablations only (see BFCL_EXPERIMENTS below)
 #
 # Default mode is validation-only, which is the safest way to "test" every
 # experiment without launching full PPO training. Use --mode train for full runs.
@@ -385,10 +390,15 @@ APPWORLD_EXPERIMENTS=(
   "overall|appworld,reme|"
 )
 
+# BFCL ablation ladder (same 400-train / 400-test split for all rows):
+#   bfcl_grpo       — pure GRPO, TOCF/PACE/GCCE off
+#   bfcl_tocf_mvp   — TOCF only (T+F patches), no PACE
+#   bfcl_tocf_pace  — TOCF + PACE (failure-rate advantage weighting)
+#   bfcl_gcce       — TOCF + GCCE (gap-conditioned routing; needs teacher cache)
 BFCL_EXPERIMENTS=(
-  "bfcl_grpo|bfcl|data/bfcl_train_200.parquet,data/bfcl_test_600.parquet"
-  "bfcl_tocf_mvp|bfcl|data/bfcl_train_200.parquet,data/bfcl_test_600.parquet"
-  "bfcl_tocf_pace|bfcl|data/bfcl_train_200.parquet,data/bfcl_test_600.parquet"
+  "bfcl_grpo|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
+  "bfcl_tocf_mvp|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
+  "bfcl_tocf_pace|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
   "bfcl_gcce|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet,data/teacher_scores_bfcl_400.json"
 )
 

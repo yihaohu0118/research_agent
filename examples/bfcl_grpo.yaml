@@ -18,8 +18,9 @@ defaults:
 
 # ── Data ──────────────────────────────────────────────────────────────────────
 data:
-  train_files: data/bfcl_train_200.parquet
-  val_files: data/bfcl_test_600.parquet
+  # Same 400/400 stratified split as bfcl_tocf_* / bfcl_gcce for fair comparison.
+  train_files: data/bfcl_train_400.parquet
+  val_files: data/bfcl_test_400.parquet
   train_batch_size: 16
   max_prompt_length: 8192
   max_response_length: 4096
