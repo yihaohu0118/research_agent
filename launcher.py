@@ -7,6 +7,7 @@ import sys
 import os
 import signal
 import shlex
+import socket
 from dotenv import load_dotenv
 from agentevolver.utils.daemon import LaunchCommandWhenAbsent
 
@@ -95,12 +96,52 @@ def parse_args():
         default=False,
         help='Kill existing ray and python processes (excluding vscode and current process) before starting')
 
-    return parser.parse_args()
+    args, hydra_overrides = parser.parse_known_args()
+    if hydra_overrides and hydra_overrides[0] == "--":
+        hydra_overrides = hydra_overrides[1:]
+    args.hydra_overrides = hydra_overrides
+    return args
+
+
+def _service_endpoint(service_name: str):
+    defaults = {
+        "appworld": ("127.0.0.1", 8080),
+        "bfcl": (os.environ.get("BFCL_HOST", "127.0.0.1"), int(os.environ.get("BFCL_PORT", "8082"))),
+        "reme": ("127.0.0.1", 8001),
+    }
+    return defaults.get(service_name.lower())
+
+
+def _port_is_open(host: str, port: int, timeout: float = 1.0) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 def pty_launch(service_name: str, success_std_string="Starting server on"):
-    service_path = os.environ.get(f'{service_name.upper()}_PATH')
-    service_script = os.environ.get(f'{service_name.upper()}_SCRIPT')
+    endpoint = _service_endpoint(service_name)
+    if endpoint is not None:
+        host, port = endpoint
+        check_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
+        if _port_is_open(check_host, port):
+            print(f"{service_name} service is already reachable at {check_host}:{port}; skipping launch.")
+            return
+
+    service_name_upper = service_name.upper()
+    service_path = os.environ.get(f'{service_name_upper}_PATH')
+    service_script = os.environ.get(f'{service_name_upper}_SCRIPT')
+    if not service_path and service_name in {"appworld", "bfcl"}:
+        service_path = "./env_service/launch_script"
+    if not service_script and service_name in {"appworld", "bfcl"}:
+        service_script = f"bash {service_name}.sh"
+    if not service_path or not service_script:
+        raise ValueError(
+            f"Missing {service_name_upper}_PATH or {service_name_upper}_SCRIPT. "
+            f"Set them in .env, or start {service_name} manually."
+        )
+
     companion = LaunchCommandWhenAbsent(
         full_argument_list=[service_script],
         dir=service_path,
@@ -376,6 +417,7 @@ def main():
             '--config-name',
             os.path.basename(exe_yaml_path),
         ]
+        cmd.extend(args.hydra_overrides)
 
         if args.with_logview:
             env.update({
@@ -383,7 +425,7 @@ def main():
             })
 
         try:
-            print(f"Running command: {' '.join(cmd)}")
+            print(f"Running command: {' '.join(shlex.quote(part) for part in cmd)}")
             subprocess.run(cmd, check=True, cwd=os.path.abspath('./'), env=env)
         except subprocess.CalledProcessError as e:
             print(f"Error running subprocess: {e}")

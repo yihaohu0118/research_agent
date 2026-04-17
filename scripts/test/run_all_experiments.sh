@@ -29,6 +29,7 @@ Options:
 
 Environment:
   PYTHON_BIN                   Python executable. Default: python3.
+  RUNNER                       launcher or direct. Default: launcher.
   LOG_ROOT                     Directory for logs. Default: experiments/run_all_experiments/<timestamp>.
   VAL_N                        Optional validation rollout count override, e.g. VAL_N=1.
   APPWORLD_PORT                Default: 8080.
@@ -48,6 +49,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${PROJECT_ROOT}"
 
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+RUNNER="${RUNNER:-launcher}"
 APPWORLD_PORT="${APPWORLD_PORT:-8080}"
 BFCL_PORT="${BFCL_PORT:-8082}"
 REME_PORT="${REME_PORT:-8001}"
@@ -131,6 +133,14 @@ case "${MODE}" in
   eval|train) ;;
   *)
     echo "Invalid --mode: ${MODE}" >&2
+    exit 2
+    ;;
+esac
+
+case "${RUNNER}" in
+  launcher|direct) ;;
+  *)
+    echo "Invalid RUNNER: ${RUNNER}" >&2
     exit 2
     ;;
 esac
@@ -256,6 +266,40 @@ start_service() {
   wait_for_port "${service}" "${host}" "${port}" 180
 }
 
+launcher_service_flag() {
+  case "$1" in
+    appworld)
+      printf '%s\n' "--with-appworld"
+      ;;
+    bfcl)
+      printf '%s\n' "--with-bfcl"
+      ;;
+    reme)
+      printf '%s\n' "--with-reme"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+service_port() {
+  case "$1" in
+    appworld)
+      printf '%s\n' "${APPWORLD_PORT}"
+      ;;
+    bfcl)
+      printf '%s\n' "${BFCL_PORT}"
+      ;;
+    reme)
+      printf '%s\n' "${REME_PORT}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 missing_required_files() {
   local csv="$1"
   local -a files=()
@@ -340,24 +384,53 @@ run_experiment() {
     if [[ "${#services[@]}" -gt 0 ]]; then
       echo "[service] required: ${services[*]}"
     fi
-  else
+  elif [[ "${RUNNER}" == "direct" ]]; then
     local service
     for service in "${services[@]}"; do
       [[ -z "${service}" ]] && continue
       start_service "${service}"
+    done
+  elif [[ "${START_SERVICES}" != "1" ]]; then
+    local service
+    for service in "${services[@]}"; do
+      [[ -z "${service}" ]] && continue
+      local port
+      port="$(service_port "${service}")"
+      if ! port_is_open "127.0.0.1" "${port}"; then
+        echo "[service] ${service} is not reachable at 127.0.0.1:${port}" >&2
+        echo "[service] Start it manually or rerun with --start-services." >&2
+        return 1
+      fi
     done
   fi
 
   build_overrides
 
   local log_file="${LOG_ROOT}/${name}.log"
-  local -a cmd=(
-    "${PYTHON_BIN}"
-    -m agentevolver.main_ppo
-    --config-path "${PROJECT_ROOT}/examples"
-    --config-name "${name}"
-    "${OVERRIDES[@]}"
-  )
+  local -a cmd=()
+  if [[ "${RUNNER}" == "launcher" ]]; then
+    cmd=(
+      "${PYTHON_BIN}"
+      "${PROJECT_ROOT}/launcher.py"
+      --conf "${PROJECT_ROOT}/examples/${name}.yaml"
+    )
+    if [[ "${START_SERVICES}" == "1" ]]; then
+      local service
+      for service in "${services[@]}"; do
+        [[ -z "${service}" ]] && continue
+        cmd+=("$(launcher_service_flag "${service}")")
+      done
+    fi
+    cmd+=("${OVERRIDES[@]}")
+  else
+    cmd=(
+      "${PYTHON_BIN}"
+      -m agentevolver.main_ppo
+      --config-path "${PROJECT_ROOT}/examples"
+      --config-name "${name}"
+      "${OVERRIDES[@]}"
+    )
+  fi
 
   echo "[experiment] log: ${log_file}"
   printf '[experiment] command:'
@@ -422,6 +495,7 @@ SKIPPED=()
 echo "[run_all] project: ${PROJECT_ROOT}"
 echo "[run_all] suite:   ${SUITE}"
 echo "[run_all] mode:    ${MODE}"
+echo "[run_all] runner:  ${RUNNER}"
 echo "[run_all] logs:    ${LOG_ROOT}"
 
 for spec in "${SELECTED_EXPERIMENTS[@]}"; do
