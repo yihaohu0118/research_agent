@@ -120,9 +120,9 @@ def _port_is_open(host: str, port: int, timeout: float = 1.0) -> bool:
         return False
 
 
-def pty_launch(service_name: str, success_std_string="Starting server on"):
+def pty_launch(service_name: str, success_std_string="Starting server on", force_restart: bool = False):
     endpoint = _service_endpoint(service_name)
-    if endpoint is not None:
+    if endpoint is not None and not force_restart:
         host, port = endpoint
         check_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
         if _port_is_open(check_host, port):
@@ -149,6 +149,7 @@ def pty_launch(service_name: str, success_std_string="Starting server on"):
         use_pty=True
     )
     companion.launch(
+        force_restart=force_restart,
         launch_wait_time=1800,
         success_std_string=success_std_string,
     )
@@ -366,11 +367,11 @@ def main():
 
     if args.with_reme:
         # test done
-        pty_launch("reme", success_std_string="Uvicorn running on")
+        pty_launch("reme", success_std_string="Uvicorn running on", force_restart=args.reboot)
 
     if args.with_appworld:
         # test done
-        pty_launch("appworld")
+        pty_launch("appworld", force_restart=args.reboot)
 
     if args.with_crafters:
         # test done
@@ -381,7 +382,7 @@ def main():
         pty_launch("webshop")
 
     if args.with_bfcl:
-        pty_launch("bfcl")
+        pty_launch("bfcl", force_restart=args.reboot)
 
     if args.with_logview:
 

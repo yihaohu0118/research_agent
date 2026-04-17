@@ -13,14 +13,20 @@ LAUNCH_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # 获取 env_service 的目录
 ENV_SERVICE_DIR="$(dirname "$LAUNCH_SCRIPT_DIR")"
+PROJECT_ROOT="$(cd "$LAUNCH_SCRIPT_DIR/../../" && pwd)"
 
 # 获取 bfcl 环境的目录
 DEFAULT_BFCL_ENV_DIR="$ENV_SERVICE_DIR/environments/bfcl"
 BFCL_ENV_DIR=${BFCL_ENV_DIR:-$DEFAULT_BFCL_ENV_DIR}
+DEFAULT_BFCL_DATA_PATH="$BFCL_ENV_DIR/bfcl_data/multi_turn_processed.jsonl"
+DEFAULT_BFCL_SPLID_ID_PATH="$BFCL_ENV_DIR/bfcl_data/multi_turn_envtuning_train200_test600_split_ids.json"
+if [ -f "$PROJECT_ROOT/data/bfcl_400_split.json" ]; then
+    DEFAULT_BFCL_SPLID_ID_PATH="$PROJECT_ROOT/data/bfcl_400_split.json"
+fi
 
 export ENV_PATH="$BFCL_ENV_DIR"
-export BFCL_DATA_PATH="${BFCL_DATA_PATH:-$BFCL_ENV_DIR/bfcl_data/multi_turn_processed.jsonl}"
-export BFCL_SPLID_ID_PATH="${BFCL_SPLID_ID_PATH:-$BFCL_ENV_DIR/bfcl_data/multi_turn_envtuning_train200_test600_split_ids.json}"
+export BFCL_DATA_PATH="${BFCL_DATA_PATH:-$DEFAULT_BFCL_DATA_PATH}"
+export BFCL_SPLID_ID_PATH="${BFCL_SPLID_ID_PATH:-${BFCL_SPLIT_ID_PATH:-$DEFAULT_BFCL_SPLID_ID_PATH}}"
 export BFCL_ANSWER_PATH="${BFCL_ANSWER_PATH:-$BFCL_ENV_DIR/bfcl_eval/possible_answer}"
 export BFCL_HOST="${BFCL_HOST:-127.0.0.1}"
 export BFCL_PORT="${BFCL_PORT:-8082}"
@@ -57,11 +63,6 @@ export OPENAI_API_KEY=xx
 # only for multinode running
 export RAY_ENV_NAME=bfcl 
 
-# 获取脚本所在目录的绝对路径
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-
-# 导航到项目根目录 (envservice)
-PROJECT_ROOT="$SCRIPT_DIR/../../"
 cd "$PROJECT_ROOT"
 
 # 设置 PYTHONPATH

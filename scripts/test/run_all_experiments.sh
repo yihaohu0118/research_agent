@@ -20,6 +20,7 @@ Options:
   --mode eval|train            eval uses trainer.val_only=true. Default: eval.
   --only PATTERN               Run experiment names containing PATTERN.
   --start-services             Start appworld/bfcl/reme services when needed.
+  --restart-services           Restart services through launcher before each experiment.
   --keep-services              Do not stop services started by this script.
   --continue-on-error          Keep running after a failed experiment.
   --skip-missing               Skip experiments whose required files are absent.
@@ -34,6 +35,7 @@ Environment:
   VAL_N                        Optional validation rollout count override, e.g. VAL_N=1.
   APPWORLD_PORT                Default: 8080.
   BFCL_PORT                    Default: 8082.
+  BFCL_SPLID_ID_PATH           Default for BFCL suite: data/bfcl_400_split.json.
   REME_PORT                    Default: 8001.
 
 Examples:
@@ -58,6 +60,7 @@ SUITE="core"
 MODE="eval"
 ONLY_PATTERN=""
 START_SERVICES=0
+RESTART_SERVICES=0
 KEEP_SERVICES=0
 CONTINUE_ON_ERROR=0
 SKIP_MISSING=0
@@ -80,6 +83,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --start-services|--with-services)
       START_SERVICES=1
+      shift
+      ;;
+    --restart-services|--reboot-services)
+      START_SERVICES=1
+      RESTART_SERVICES=1
       shift
       ;;
     --keep-services)
@@ -158,6 +166,9 @@ if [[ -f "${PROJECT_ROOT}/.env" ]]; then
 fi
 
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
+if [[ "${SUITE}" == "bfcl" || "${SUITE}" == "core" ]]; then
+  export BFCL_SPLID_ID_PATH="${BFCL_SPLID_ID_PATH:-${BFCL_SPLIT_ID_PATH:-${PROJECT_ROOT}/data/bfcl_400_split.json}}"
+fi
 
 STARTED_PIDS=()
 
@@ -415,6 +426,9 @@ run_experiment() {
       --conf "${PROJECT_ROOT}/examples/${name}.yaml"
     )
     if [[ "${START_SERVICES}" == "1" ]]; then
+      if [[ "${RESTART_SERVICES}" == "1" ]]; then
+        cmd+=(--reboot)
+      fi
       local service
       for service in "${services[@]}"; do
         [[ -z "${service}" ]] && continue
