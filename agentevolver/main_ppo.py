@@ -17,7 +17,7 @@ Note that we don't combine the main with ray_trainer as ray_trainer is used by o
 """
 # from best_logger import register_logger
 import torch
-from agentevolver.client.llm_client import DashScopeClient
+from agentevolver.client.llm_client import DashScopeClient, UnavailableLlmClient
 from agentevolver.module.task_manager.base import NaiveTaskObjectiveRetrieval
 from agentevolver.module.task_manager.data_mixture import OriginalOnlyStrategy, UnifiedMixtureStrategy
 from agentevolver.module.task_manager.strategies.random import LlmRandomSamplingExploreStrategy
@@ -59,6 +59,33 @@ def _ray_system_config_from_env() -> dict:
         )
 
     return system_config
+
+
+def _task_manager_needs_llm(config) -> bool:
+    task_manager_cfg = config.task_manager
+    mixture_cfg = task_manager_cfg.get("mixture", {}) or {}
+    n_explore = int(task_manager_cfg.get("n", 0) or 0)
+    synthetic_ratio = float(mixture_cfg.get("synthetic_data_ratio", 0.0) or 0.0)
+    return n_explore > 0 or synthetic_ratio > 0.0
+
+
+def _make_task_manager_llm_client(config):
+    if os.environ.get("DASHSCOPE_API_KEY"):
+        return DashScopeClient(model_name=config.task_manager.llm_client)
+
+    reason = (
+        "DASHSCOPE_API_KEY is required because this run tried to use the "
+        "task-manager LLM client. Set DASHSCOPE_API_KEY or disable synthetic "
+        "task exploration."
+    )
+    if _task_manager_needs_llm(config):
+        raise ValueError(reason)
+
+    print(
+        "[task-manager] DASHSCOPE_API_KEY is not set; using an unavailable "
+        "LLM client because task_manager.n=0 and synthetic_data_ratio=0."
+    )
+    return UnavailableLlmClient(reason)
 
 
 if "kl_control" in os.environ.get("DEBUG_ARG",""):
@@ -310,7 +337,7 @@ class TaskRunner:
         from verl.utils.dataset.rl_dataset import collate_fn
 
         # init task manager
-        llm_client=DashScopeClient(model_name=config.task_manager.llm_client)
+        llm_client = _make_task_manager_llm_client(config)
         tocf_cfg = config.get("tocf", {})
         tocf_task_distribution_cfg = tocf_cfg.get("task_distribution", {}) if tocf_cfg else {}
         tocf_feedback_cfg = tocf_cfg.get("feedback", {}) if tocf_cfg else {}

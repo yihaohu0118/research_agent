@@ -25,7 +25,7 @@ import requests
 from torch.utils.data import IterableDataset,Dataset
 from tqdm import tqdm
 from agentevolver.client.env_client import EnvClient
-from agentevolver.client.llm_client import DashScopeClient
+from agentevolver.client.llm_client import DashScopeClient, UnavailableLlmClient
 from agentevolver.module.agent_flow.agent_flow import AgentFlow
 from agentevolver.module.agent_flow.base_agent_flow import BaseAgentFlow
 from agentevolver.module.task_manager import adapter
@@ -98,7 +98,14 @@ class TaskManager(object):
         self._post_filter: list[TaskPostFilter] = [LlmFilter(env_service_url,llm_client,self._num_exploration_threads,tokenizer=tokenizer,config=config)]  # ⭐ Initialize the post filter
 
         self._tasks: list[Task]=[]
-        self._exploration_strategy._inject_deps(self._old_retrival,self._llm_client,DashScopeClient(model_name='qwen3-235b-a22b-instruct-2507',max_tokens=8192),env_profile=env_profile)  # ⭐ Inject dependencies into the exploration strategy
+        if os.environ.get("DASHSCOPE_API_KEY"):
+            summarize_llm_client = DashScopeClient(model_name='qwen3-235b-a22b-instruct-2507',max_tokens=8192)
+        else:
+            summarize_llm_client = UnavailableLlmClient(
+                "DASHSCOPE_API_KEY is required because task exploration tried "
+                "to use the summarizer LLM client."
+            )
+        self._exploration_strategy._inject_deps(self._old_retrival,self._llm_client,summarize_llm_client,env_profile=env_profile)  # ⭐ Inject dependencies into the exploration strategy
 
     @property
     def seed_tasks(self):

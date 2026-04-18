@@ -14,6 +14,22 @@ class LlmException(Exception):
     @property
     def typ(self):
         return self._type
+
+
+class UnavailableLlmClient:
+    """Placeholder LLM client for code paths that should not call an LLM."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+
+    def chat(self, messages: list[dict[str, str]], sampling_params: dict[str, Any]) -> str:
+        raise ValueError(self.reason)
+
+    def chat_stream(self, messages: list[dict[str, str]], sampling_params: dict[str, Any]) -> Generator[str, None, None]:
+        raise ValueError(self.reason)
+
+    def chat_completion(self, messages: list[dict[str, str]], stream: bool = False, **kwargs) -> str | Generator[str, None, None]:
+        raise ValueError(self.reason)
         
 
 class DashScopeClient:
