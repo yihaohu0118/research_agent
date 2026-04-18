@@ -142,6 +142,20 @@ VAL_DIR="${VAL_DIR:-${RUN_ROOT}/validation_log}"
 LOG_FILE="${RUN_ROOT}/teacher_val.log"
 mkdir -p "${RUN_ROOT}" "${VAL_DIR}" "$(dirname "${OUTPUT_CACHE}")"
 
+# This script does not use task exploration or LLM judging, but the training
+# stack still constructs DashScope clients while wiring TaskManager objects.
+# Provide an inert key so val-only BFCL teacher runs do not require a real API
+# key. If the caller exports a real key, keep it.
+export DASHSCOPE_API_KEY="${DASHSCOPE_API_KEY:-sk-unused-for-bfcl-teacher-val}"
+
+# Keep Ray away from /var/tmp by default. Users can still override these before
+# launching if they have a larger scratch mount.
+export TMPDIR="${TMPDIR:-${RUN_ROOT}/tmp}"
+export RAY_TMPDIR="${RAY_TMPDIR:-${RUN_ROOT}/ray_tmp}"
+export RAY_OBJECT_SPILL_DIR="${RAY_OBJECT_SPILL_DIR:-${RUN_ROOT}/ray_spill}"
+export RAY_LOCAL_FS_CAPACITY_THRESHOLD="${RAY_LOCAL_FS_CAPACITY_THRESHOLD:-0.99}"
+mkdir -p "${TMPDIR}" "${RAY_TMPDIR}" "${RAY_OBJECT_SPILL_DIR}"
+
 CMD=(
   "${PYTHON_BIN}"
   "${PROJECT_ROOT}/launcher.py"
@@ -169,6 +183,9 @@ CMD+=(
   "trainer.save_freq=0"
   "trainer.save_best_checkpoint=false"
   "trainer.n_gpus_per_node=${NUM_GPUS}"
+  "task_manager.n=0"
+  "task_manager.mixture.synthetic_data_ratio=0.0"
+  "task_manager.mixture.use_original_tasks=true"
   "actor_rollout_ref.model.path=${MODEL_PATH}"
   "actor_rollout_ref.rollout.use_qwen3=true"
   "actor_rollout_ref.rollout.temperature=0"
