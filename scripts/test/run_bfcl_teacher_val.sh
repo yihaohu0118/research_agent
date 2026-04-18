@@ -12,11 +12,11 @@ Usage:
   bash scripts/test/run_bfcl_teacher_val.sh [options] [-- hydra.override=value ...]
 
 Options:
-  --model-path PATH             Teacher HF/local model path. Default: Qwen/Qwen3-32B
-  --teacher-model NAME          Name stored in cache metadata. Default: qwen3-32b
+  --model-path PATH             Teacher HF/local model path. Default: IcyFish/Qwen3-4B-EnvTuning
+  --teacher-model NAME          Name stored in cache metadata. Default: qwen3-4b-envtuning
   --teacher-parquet PATH        Split to validate/cache. Default: data/bfcl_train_400.parquet
-  --output-cache PATH           Output cache. Default: data/teacher_scores_bfcl_400_qwen3_32b.json
-  --experiment-name NAME        Experiment/log name. Default: bfcl_teacher_qwen3_32b_train400
+  --output-cache PATH           Output cache. Default: data/teacher_scores_bfcl_400_qwen3_4b_envtuning.json
+  --experiment-name NAME        Experiment/log name. Default: bfcl_teacher_qwen3_4b_envtuning_train400
   --num-gpus N                  trainer.n_gpus_per_node. Default: 8
   --tp-size N                   rollout tensor parallel size. Default: 8
   --gpu-mem-util FLOAT          vLLM GPU memory utilization. Default: 0.7
@@ -33,7 +33,7 @@ Examples:
     bash scripts/test/run_bfcl_teacher_val.sh --restart-services
 
   bash scripts/test/run_bfcl_teacher_val.sh \
-    --model-path /path/to/Qwen3-32B \
+    --model-path /path/to/Qwen3-4B-EnvTuning \
     --output-cache data/teacher_scores_bfcl_400.json
 EOF
 }
@@ -43,11 +43,11 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${PROJECT_ROOT}"
 
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-MODEL_PATH="${MODEL_PATH:-Qwen/Qwen3-32B}"
-TEACHER_MODEL="${TEACHER_MODEL:-qwen3-32b}"
+MODEL_PATH="${MODEL_PATH:-IcyFish/Qwen3-4B-EnvTuning}"
+TEACHER_MODEL="${TEACHER_MODEL:-qwen3-4b-envtuning}"
 TEACHER_PARQUET="${TEACHER_PARQUET:-data/bfcl_train_400.parquet}"
-OUTPUT_CACHE="${OUTPUT_CACHE:-data/teacher_scores_bfcl_400_qwen3_32b.json}"
-EXPERIMENT_NAME="${EXPERIMENT_NAME:-bfcl_teacher_qwen3_32b_train400}"
+OUTPUT_CACHE="${OUTPUT_CACHE:-data/teacher_scores_bfcl_400_qwen3_4b_envtuning.json}"
+EXPERIMENT_NAME="${EXPERIMENT_NAME:-bfcl_teacher_qwen3_4b_envtuning_train400}"
 NUM_GPUS="${NUM_GPUS:-8}"
 TP_SIZE="${TP_SIZE:-8}"
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.7}"
