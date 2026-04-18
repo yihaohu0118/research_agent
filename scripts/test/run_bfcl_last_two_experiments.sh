@@ -10,20 +10,27 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  bash scripts/test/run_bfcl_last_two_experiments.sh [run_all options] [-- hydra.override=value ...]
+  bash scripts/test/run_bfcl_last_two_experiments.sh [options] [run_all options] [-- hydra.override=value ...]
 
 Runs only:
   - bfcl_tocf_pace
   - bfcl_gcce
 
+Options:
+  --gcce-teacher-cache PATH     Append gcce.teacher.cache_path only for bfcl_gcce.
+
 Examples:
   bash scripts/test/run_bfcl_last_two_experiments.sh --dry-run
   bash scripts/test/run_bfcl_last_two_experiments.sh --mode eval --restart-services
   bash scripts/test/run_bfcl_last_two_experiments.sh --mode train --restart-services
+  bash scripts/test/run_bfcl_last_two_experiments.sh --mode train --restart-services \
+    --gcce-teacher-cache data/teacher_scores_bfcl_400_qwen3_4b_envtuning.json
   VAL_N=1 bash scripts/test/run_bfcl_last_two_experiments.sh --mode eval --continue-on-error -- trainer.n_gpus_per_node=4
 
 Notes:
   Do not pass --suite or --only; this wrapper fixes them to the last two BFCL experiments.
+  Global Hydra overrides after -- are forwarded to both experiments. Use
+  --gcce-teacher-cache for GCCE-only teacher-cache overrides.
   LOG_ROOT defaults to experiments/run_bfcl_last_two_experiments/<timestamp>.
 EOF
 }
@@ -38,19 +45,61 @@ if [[ ! -x "${RUN_ALL}" && ! -f "${RUN_ALL}" ]]; then
 fi
 
 CONTINUE_ON_ERROR=0
-for arg in "$@"; do
-  case "${arg}" in
+GCCE_TEACHER_CACHE="${GCCE_TEACHER_CACHE:-}"
+FORWARDED_ARGS=()
+
+append_forwarded_arg() {
+  case "$1" in
+    gcce.teacher.cache_path=*|+gcce.teacher.cache_path=*)
+      GCCE_TEACHER_CACHE="${1#*=}"
+      ;;
+    *)
+      FORWARDED_ARGS+=("$1")
+      ;;
+  esac
+}
+
+forwarded_has_hydra_separator() {
+  local arg
+  for arg in "${FORWARDED_ARGS[@]}"; do
+    if [[ "${arg}" == "--" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     -h|--help)
       usage
       exit 0
       ;;
     --suite|--only)
-      echo "ERROR: ${arg} is managed by this wrapper; do not pass it." >&2
+      echo "ERROR: $1 is managed by this wrapper; do not pass it." >&2
       usage >&2
       exit 2
       ;;
+    --gcce-teacher-cache)
+      GCCE_TEACHER_CACHE="${2:?missing value for --gcce-teacher-cache}"
+      shift 2
+      ;;
     --continue-on-error)
       CONTINUE_ON_ERROR=1
+      FORWARDED_ARGS+=("$1")
+      shift
+      ;;
+    --)
+      append_forwarded_arg "$1"
+      shift
+      while [[ $# -gt 0 ]]; do
+        append_forwarded_arg "$1"
+        shift
+      done
+      ;;
+    *)
+      append_forwarded_arg "$1"
+      shift
       ;;
   esac
 done
@@ -77,8 +126,17 @@ for exp_name in "${EXPERIMENTS[@]}"; do
   echo "[run_bfcl_last_two] ${exp_name}"
   echo "############################################################"
 
+  cmd=(bash "${RUN_ALL}" --suite bfcl --only "${exp_name}" "${FORWARDED_ARGS[@]}")
+  if [[ "${exp_name}" == "bfcl_gcce" && -n "${GCCE_TEACHER_CACHE}" ]]; then
+    if forwarded_has_hydra_separator; then
+      cmd+=("gcce.teacher.cache_path=${GCCE_TEACHER_CACHE}")
+    else
+      cmd+=(-- "gcce.teacher.cache_path=${GCCE_TEACHER_CACHE}")
+    fi
+  fi
+
   set +e
-  bash "${RUN_ALL}" --suite bfcl --only "${exp_name}" "$@"
+  "${cmd[@]}"
   status="$?"
   set -e
 
