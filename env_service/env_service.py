@@ -13,6 +13,7 @@ import argparse
 import asyncio
 from dataclasses import dataclass
 import importlib
+import json
 import os
 import sys
 import time
@@ -32,6 +33,27 @@ from .registry import Registry
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def ray_system_config_from_env() -> dict:
+    """Build Ray system config from environment overrides."""
+    system_config = {}
+
+    threshold = os.environ.get("RAY_LOCAL_FS_CAPACITY_THRESHOLD")
+    if threshold:
+        system_config["local_fs_capacity_threshold"] = float(threshold)
+
+    spill_dir = os.environ.get("RAY_OBJECT_SPILL_DIR")
+    if spill_dir:
+        os.makedirs(spill_dir, exist_ok=True)
+        system_config["object_spilling_config"] = json.dumps(
+            {
+                "type": "filesystem",
+                "params": {"directory_path": spill_dir},
+            }
+        )
+
+    return system_config
 
 
 def ensure_env(name: str, rel_path: str) -> None:
@@ -140,7 +162,7 @@ class EnvService:
         )
 
         if not ray.is_initialized():
-            ray.init(address='local')
+            ray.init(address='local', _system_config=ray_system_config_from_env())
         self.env_actors = {}
         self.remote_env = {}
         self.last_access_time = {}

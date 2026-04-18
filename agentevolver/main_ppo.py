@@ -28,6 +28,7 @@ from agentevolver.module.tocf.sampler import AdaptiveMixtureStrategy
 # register_logger(non_console_mods=non_console_mods, auto_clean_mods=[], base_log_path="logs/agentevolver", debug=True)
 
 import os
+import json
 import hydra
 import ray
 
@@ -37,6 +38,29 @@ from verl.trainer.ppo.reward import load_reward_manager
 from agentevolver.module.trainer.ae_ray_trainer import AgentEvolverRayPPOTrainer
 
 from verl.trainer.ppo import core_algos
+
+
+def _ray_system_config_from_env() -> dict:
+    """Build Ray system config from environment overrides."""
+    system_config = {}
+
+    threshold = os.environ.get("RAY_LOCAL_FS_CAPACITY_THRESHOLD")
+    if threshold:
+        system_config["local_fs_capacity_threshold"] = float(threshold)
+
+    spill_dir = os.environ.get("RAY_OBJECT_SPILL_DIR")
+    if spill_dir:
+        os.makedirs(spill_dir, exist_ok=True)
+        system_config["object_spilling_config"] = json.dumps(
+            {
+                "type": "filesystem",
+                "params": {"directory_path": spill_dir},
+            }
+        )
+
+    return system_config
+
+
 if "kl_control" in os.environ.get("DEBUG_ARG",""):
     print("monkeypatching kl loss")
     def kl_penalty(logprob: torch.FloatTensor, ref_logprob: torch.FloatTensor, kl_penalty) -> torch.FloatTensor:
@@ -162,6 +186,7 @@ def run_ppo(config) -> None:
              "VLLM_ALLOW_RUNTIME_LORA_UPDATING": "true", "VLLM_USE_V1": "1", "WANDB_API_KEY": "local-e93291bd40698a593a1fcc5b99da6a71a753a383",
              "WANDB_BASE_URL": "http://22.6.186.25:8080"}},
             num_cpus=config.ray_init.num_cpus,
+            _system_config=_ray_system_config_from_env(),
         )  # ⭐ Initialize the Ray cluster with the specified runtime environment and number of CPUs
 
     max_model_len: int = config.actor_rollout_ref.rollout.max_model_len
