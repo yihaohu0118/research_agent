@@ -148,10 +148,12 @@ mkdir -p "${RUN_ROOT}" "${VAL_DIR}" "$(dirname "${OUTPUT_CACHE}")"
 # key. If the caller exports a real key, keep it.
 export DASHSCOPE_API_KEY="${DASHSCOPE_API_KEY:-sk-unused-for-bfcl-teacher-val}"
 
-# Keep Ray away from /var/tmp by default. Users can still override these before
-# launching if they have a larger scratch mount.
+# Keep Ray away from /var/tmp by default. RAY_TMPDIR must be short because Ray
+# creates AF_UNIX socket paths under it, and Linux caps those at 107 bytes.
+# Users can still override these before launching if they have a larger scratch
+# mount with a short path.
 export TMPDIR="${TMPDIR:-${RUN_ROOT}/tmp}"
-export RAY_TMPDIR="${RAY_TMPDIR:-${RUN_ROOT}/ray_tmp}"
+export RAY_TMPDIR="${RAY_TMPDIR:-/tmp/ae_ray_${USER:-user}}"
 export RAY_OBJECT_SPILL_DIR="${RAY_OBJECT_SPILL_DIR:-${RUN_ROOT}/ray_spill}"
 export RAY_LOCAL_FS_CAPACITY_THRESHOLD="${RAY_LOCAL_FS_CAPACITY_THRESHOLD:-0.99}"
 mkdir -p "${TMPDIR}" "${RAY_TMPDIR}" "${RAY_OBJECT_SPILL_DIR}"
