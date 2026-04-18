@@ -983,6 +983,9 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
             sample_scores.extend(scores)
 
             reward_extra_infos_dict["reward"].extend(scores)
+            task_ids = test_output_gen_batch.non_tensor_batch.get("task_ids", [])
+            if len(task_ids) == len(scores):
+                reward_extra_infos_dict["task_id"].extend([str(tid) for tid in task_ids])
             if "reward_extra_info" in result:
                 for key, lst in result["reward_extra_info"].items():
                     reward_extra_infos_dict[key].extend(lst)
