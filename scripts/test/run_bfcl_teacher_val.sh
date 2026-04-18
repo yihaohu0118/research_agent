@@ -17,9 +17,9 @@ Options:
   --teacher-parquet PATH        Split to validate/cache. Default: data/bfcl_train_400.parquet
   --output-cache PATH           Output cache. Default: data/teacher_scores_bfcl_400_qwen3_32b.json
   --experiment-name NAME        Experiment/log name. Default: bfcl_teacher_qwen3_32b_train400
-  --num-gpus N                  trainer.n_gpus_per_node. Default: 4
-  --tp-size N                   rollout tensor parallel size. Default: 4
-  --gpu-mem-util FLOAT          vLLM GPU memory utilization. Default: 0.8
+  --num-gpus N                  trainer.n_gpus_per_node. Default: 8
+  --tp-size N                   rollout tensor parallel size. Default: 8
+  --gpu-mem-util FLOAT          vLLM GPU memory utilization. Default: 0.7
   --max-env-worker N            BFCL env workers. Default: 32
   --restart-services            Restart BFCL service through launcher.
   --no-start-services           Do not ask launcher to start BFCL.
@@ -48,9 +48,9 @@ TEACHER_MODEL="${TEACHER_MODEL:-qwen3-32b}"
 TEACHER_PARQUET="${TEACHER_PARQUET:-data/bfcl_train_400.parquet}"
 OUTPUT_CACHE="${OUTPUT_CACHE:-data/teacher_scores_bfcl_400_qwen3_32b.json}"
 EXPERIMENT_NAME="${EXPERIMENT_NAME:-bfcl_teacher_qwen3_32b_train400}"
-NUM_GPUS="${NUM_GPUS:-4}"
-TP_SIZE="${TP_SIZE:-4}"
-GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.8}"
+NUM_GPUS="${NUM_GPUS:-8}"
+TP_SIZE="${TP_SIZE:-8}"
+GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.7}"
 MAX_ENV_WORKER="${MAX_ENV_WORKER:-32}"
 VAL_N="${VAL_N:-1}"
 PROMPT_LENGTH="${PROMPT_LENGTH:-8192}"
@@ -185,9 +185,11 @@ CMD+=(
   "trainer.save_freq=0"
   "trainer.save_best_checkpoint=false"
   "trainer.n_gpus_per_node=${NUM_GPUS}"
+  "algorithm.use_kl_in_reward=false"
   "task_manager.n=0"
   "task_manager.mixture.synthetic_data_ratio=0.0"
   "task_manager.mixture.use_original_tasks=true"
+  "actor_rollout_ref.actor.use_kl_loss=false"
   "actor_rollout_ref.model.path=${MODEL_PATH}"
   "actor_rollout_ref.rollout.use_qwen3=true"
   "actor_rollout_ref.rollout.temperature=0"
