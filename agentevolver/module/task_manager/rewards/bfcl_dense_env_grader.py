@@ -73,6 +73,43 @@ class BfclDenseEnvGrader(RewardCalculator):
             weight = float(metadata_cfg["partial_credit_weight"])
         return max(0.0, weight)
 
+    # ---------------------------------------------------------------- F-Patch
+    # Multi-level partial credit.
+    #
+    # The original grader clamped every non-passing trajectory to 0.0 because
+    # BFCL's multi_turn accuracy is 0/1. This gave a formally "dense" grader
+    # that was in practice binary. The F-Patch restores a real dense signal
+    # by combining four cheap per-rollout shape statistics emitted by
+    # env_handler._diagnose_trajectory:
+    #
+    #   s1 = turn_coverage_rate         (made any call in each user turn)
+    #   s2 = tool_call_accept_rate      (calls not rejected by parser/avail)
+    #   s3 = tool_exec_success_rate     (executions that did not error)
+    #   s4 = BFCL pass  (0/1)
+    #
+    # These four numbers are all in [0, 1] and are ordered by "closeness to
+    # correctness". A weighted sum, capped at `partial_credit_cap` for any
+    # non-passing trajectory, preserves the semantics you want: a passing
+    # rollout still gets 1.0, a completely silent rollout gets ~0, and
+    # intermediate shapes get intermediate reward. The cap stays configurable
+    # so it can be dropped back to 0 for a fair F-Patch-off ablation.
+    _F_WEIGHTS = (
+        ("turn_coverage_rate", 0.25),
+        ("tool_call_accept_rate", 0.25),
+        ("tool_exec_success_rate", 0.50),
+    )
+
+    def _partial_signal(self, result: dict) -> tuple[float, dict]:
+        components = {}
+        accum = 0.0
+        for key, weight in self._F_WEIGHTS:
+            raw_key = f"trajectory_{key}" if not key.startswith("trajectory_") else key
+            value = float(result.get(raw_key, 0.0) or 0.0)
+            value = max(0.0, min(1.0, value))
+            components[key] = value
+            accum += weight * value
+        return accum, components
+
     def calculate_reward(self, trajectory: Trajectory, env: EnvClient, instance_id: str) -> GraderResult:
         result = env.evaluate(instance_id, params={"sparse": False})
         if isinstance(result, dict):
@@ -83,19 +120,30 @@ class BfclDenseEnvGrader(RewardCalculator):
             completed = raw_accuracy >= 1.0
             result = {"accuracy": raw_accuracy, "completed": completed}
 
+        cap = self._partial_credit_cap()
+        weight = self._partial_credit_weight()
+
         if raw_accuracy >= 1.0:
             score = 1.0
+            partial_value = 1.0
+            components = {k: 1.0 for k, _ in self._F_WEIGHTS}
         else:
-            score = min(self._partial_credit_cap(), raw_accuracy * self._partial_credit_weight())
+            partial_value, components = self._partial_signal(
+                result if isinstance(result, dict) else {}
+            )
+            score = min(cap, weight * partial_value)
 
         metadata = {
             "bfcl_dense_raw": result,
             "bfcl_dense_raw_accuracy": raw_accuracy,
-            "bfcl_dense_cap": self._partial_credit_cap(),
+            "bfcl_dense_cap": cap,
             "bfcl_dense_completed": completed,
+            "bfcl_dense_partial_value": float(partial_value),
+            "bfcl_dense_components": components,
         }
         reason = (
-            f"BFCL dense env reward: score={score:.4f}, "
-            f"raw_accuracy={raw_accuracy:.4f}, cap={metadata['bfcl_dense_cap']:.4f}, completed={completed}"
+            f"BFCL dense F-Patch: score={score:.4f}, "
+            f"raw_accuracy={raw_accuracy:.4f}, partial={partial_value:.4f}, "
+            f"cap={cap:.4f}, completed={completed}"
         )
         return {"score": score, "reason": reason, "metadata": metadata}

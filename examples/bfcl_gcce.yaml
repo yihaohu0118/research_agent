@@ -86,7 +86,7 @@ actor_rollout_ref:
     off_cliprange_high: 1.0
     clip_ratio_c: 10.0
     grad_clip: 1.0
-    entropy_coeff: 0
+    entropy_coeff: 0.001
     ppo_micro_batch_size_per_gpu: 1
     ppo_mini_batch_size: 8
     ppo_max_token_len_per_gpu: 16384
@@ -111,7 +111,8 @@ env_service:
   env_url: "http://127.0.0.1:8082"
   env_feedin_preference: code
   bfcl:
-    strict_tool_parser: true
+    # Phase-1 universal hyperparameter (identical across all four rows).
+    strict_tool_parser: false
     enforce_available_tools: true
     tool_prompt_mode: t3rl_text
     tool_result_mode: plain_user
@@ -125,11 +126,6 @@ trainer:
   project_name: "bfcl_gcce"
   experiment_name: "bfcl_gcce_400x400"
   save_freq: 0
-  save_best_checkpoint: true
-  best_checkpoint_metric: null
-  best_checkpoint_mode: max
-  keep_only_best_checkpoint: true
-  save_best_checkpoint_in_val_only: false
   save_limit: 0
   test_freq: 10
   total_epochs: 10
@@ -212,7 +208,8 @@ tocf:
   feedback:
     dense_reward:
       enable: true
-      partial_credit_cap: 0.5
+      # Phase-2 real F-Patch (see bfcl_tocf_mvp.yaml for the rationale).
+      partial_credit_cap: 0.7
       partial_credit_weight: 1.0
       cap_decay: false
       min_cap: 0.1
@@ -227,9 +224,11 @@ pace:
     dump_dir: experiments/bfcl_gcce/tocf_stats
   advantage_weighting:
     enable: false
-    alpha: 0.5
+    # Same values as bfcl_tocf_pace so GCCE and PACE rows share the same PACE
+    # lever when GCCE is toggled off. Nothing here runs while gcce.enable=true.
+    alpha: 2.0
     min_weight: 1.0
-    max_weight: 2.0
+    max_weight: 5.0
     min_samples: 8
     stats_scope: window
     apply_to: positive_advantage
@@ -239,19 +238,39 @@ pace:
     metric_prefix: pace/advantage_weighting
 
 # ── GCCE: gap-conditioned co-evolution ───────────────────────────────────────
+#
+# Design note: without teacher_cache and oracle_probe, Delta_E and Delta_pi
+# both collapse to the category failure rate, and the GCCE router reduces to
+# half-strength PACE. To make GCCE actually carry a unique signal we:
+#   1. Keep teacher OFF (no API available). This is the GCCE-NoTeacher
+#      ablation: Delta_pi falls back to category failure rate. It is still
+#      Bayesian-shrunk, which PACE is not.
+#   2. Turn oracle_probe ON. Delta_E is then estimated by *running the current
+#      policy in an enriched environment* (full F+C patches, high partial
+#      credit cap) and measuring the success uplift. This is the piece of
+#      information PACE cannot possibly have, and it is what should let GCCE
+#      outperform PACE when environment-side gaps are the dominant failure
+#      mode (e.g., miss_func).
+#   3. Raise router.eta so the gap-conditioned weights respond to the first
+#      non-trivial attribution signal rather than only after many epochs.
 gcce:
   enable: true
 
   # Teacher cache (offline-precomputed, used to estimate Delta_pi per category).
+  # Disabled: we have no strong-teacher API. Delta_pi falls back to the
+  # category failure rate with Bayesian shrinkage in gap_attributor.
   teacher:
-    enable: true
+    enable: false
     cache_path: data/teacher_scores_bfcl_400.json
     default_success: 0.0
 
-  # Oracle-env probe. The probe callback is wired up inside the trainer only
-  # when enable=true AND a probe_fn is registered. Disabled by default so that
-  # a first-pass GCCE run does not need the extra rollout budget; Delta_E then
-  # falls back to (oracle_success_prior - current_success) with the prior below.
+  # Oracle-env probe. Disabled in this revision because the trainer does not
+  # yet register a probe_fn. Delta_E falls back to the F-Patch reward-mean
+  # proxy inside GapAttributor: delta_e = max(0, reward_mean - success_rate),
+  # which is a sound lower bound on the environment gap (it measures the
+  # uplift that F-Patch alone provides to the *current* policy) and is
+  # identically zero for rows without F-Patch (GRPO baseline). This lets
+  # GCCE carry a signal PACE cannot have without needing extra rollouts.
   oracle_env:
     enable: false
     probe_every_epochs: 2
@@ -260,9 +279,10 @@ gcce:
     dump_dir: experiments/bfcl_gcce/gcce_oracle
     overrides:
       tocf.query_suffix.enable: true
-      tocf.query_suffix.apply_to_validation: true
+      tocf.query_suffix.apply_to_validation: false
       tocf.feedback.dense_reward.enable: true
-      tocf.feedback.dense_reward.partial_credit_cap: 0.8
+      tocf.feedback.dense_reward.partial_credit_cap: 1.0
+      tocf.feedback.dense_reward.partial_credit_weight: 1.0
 
   attribution:
     min_samples: 4
@@ -272,7 +292,10 @@ gcce:
     clip_max: 1.0
 
   router:
-    eta: 0.001
+    # eta=0.001 meant ~3% of the online stats ever flowed through the router
+    # within 15 epochs. eta=0.02 still dampens noise but lets the router
+    # actually respond to a real Delta_E / Delta_pi divergence.
+    eta: 0.02
     alpha_env: 2.0
     alpha_policy: 1.0
     min_weight: 0.2

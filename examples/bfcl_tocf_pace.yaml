@@ -82,7 +82,7 @@ actor_rollout_ref:
     off_cliprange_high: 1.0
     clip_ratio_c: 10.0
     grad_clip: 1.0
-    entropy_coeff: 0
+    entropy_coeff: 0.001
     ppo_micro_batch_size_per_gpu: 1
     ppo_mini_batch_size: 8
     ppo_max_token_len_per_gpu: 16384
@@ -107,7 +107,8 @@ env_service:
   env_url: "http://127.0.0.1:8082"
   env_feedin_preference: code
   bfcl:
-    strict_tool_parser: true
+    # Phase-1 universal hyperparameter (identical across all four rows).
+    strict_tool_parser: false
     enforce_available_tools: true
     tool_prompt_mode: t3rl_text
     tool_result_mode: plain_user
@@ -121,11 +122,6 @@ trainer:
   project_name: "bfcl_tocf_pace"
   experiment_name: "bfcl_tocf_pace"
   save_freq: 0
-  save_best_checkpoint: true
-  best_checkpoint_metric: null
-  best_checkpoint_mode: max
-  keep_only_best_checkpoint: true
-  save_best_checkpoint_in_val_only: false
   save_limit: 0
   test_freq: 10
   total_epochs: 10
@@ -204,7 +200,8 @@ tocf:
   feedback:
     dense_reward:
       enable: true
-      partial_credit_cap: 0.5
+      # Phase-2 real F-Patch (see bfcl_tocf_mvp.yaml for the rationale).
+      partial_credit_cap: 0.7
       partial_credit_weight: 1.0
       cap_decay: false
       min_cap: 0.1
@@ -215,9 +212,16 @@ pace:
     dump_dir: experiments/bfcl_tocf_pace/tocf_stats
   advantage_weighting:
     enable: true
-    alpha: 0.5
+    # With alpha=0.5 and max=2 the clipped weight for rho≈0.74 was 1.37,
+    # i.e. nearly uniform. Under a heavy-tailed failure distribution PACE
+    # needs a strictly stronger lever to be distinguishable from GRPO.
+    # alpha=2.0, max=5.0 gives w=1+2*0.74=2.48 for a typical failed category
+    # and saturates at 5.0 only for near-catastrophic ones. This matches the
+    # regime in which PACE's "rare successes in hard categories get amplified"
+    # story actually bites.
+    alpha: 2.0
     min_weight: 1.0
-    max_weight: 2.0
+    max_weight: 5.0
     min_samples: 8
     stats_scope: window
     apply_to: positive_advantage

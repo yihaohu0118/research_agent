@@ -579,6 +579,29 @@ class EnvHandler:
                     ],
                     "trajectory_has_tool_error": diagnostics["has_tool_error"],
                     "trajectory_error_count": diagnostics["error_count"],
+                    # TOCF F-Patch dense signals. Consumed by
+                    # agentevolver.module.task_manager.rewards.bfcl_dense_env_grader
+                    # when tocf.feedback.dense_reward.enable = true.
+                    "trajectory_num_user_turns": diagnostics["num_user_turns"],
+                    "trajectory_num_turns_with_tool_call": diagnostics[
+                        "num_turns_with_tool_call"
+                    ],
+                    "trajectory_num_tool_calls_attempted": diagnostics[
+                        "num_tool_calls_attempted"
+                    ],
+                    "trajectory_num_tool_calls_accepted": diagnostics[
+                        "num_tool_calls_accepted"
+                    ],
+                    "trajectory_num_tool_executions_no_error": diagnostics[
+                        "num_tool_executions_no_error"
+                    ],
+                    "trajectory_turn_coverage_rate": diagnostics["turn_coverage_rate"],
+                    "trajectory_tool_call_accept_rate": diagnostics[
+                        "tool_call_accept_rate"
+                    ],
+                    "trajectory_tool_exec_success_rate": diagnostics[
+                        "tool_exec_success_rate"
+                    ],
                 }
             )
 
@@ -634,31 +657,100 @@ class EnvHandler:
         Official BFCL rewards eventual success after tool feedback. For stricter
         reporting, we also track whether the trajectory contained malformed tool
         calls or tool execution errors before it eventually recovered.
+
+        This also emits the fine-grained signals consumed by the TOCF F-Patch
+        (real dense reward) grader. Each signal is a pure aggregate over the
+        rollout, so it is cheap to compute and independent of BFCL's scorer.
         """
         has_invalid_tool_call = False
         has_tool_error = False
         error_count = 0
 
+        # Per-turn state machine. A "turn" starts at each user message and ends
+        # at the next user message or end-of-trajectory.
+        num_user_turns = 0
+        num_turns_with_tool_call = 0
+        num_tool_calls_attempted = 0
+        num_tool_calls_accepted = 0     # not rejected by parser/availability
+        num_tool_executions_no_error = 0  # tool message had no error-like marker
+
+        in_turn = False
+        turn_had_call = False
+
         for message in messages:
             role = message.get("role")
+
+            if role == "user":
+                if in_turn and turn_had_call:
+                    num_turns_with_tool_call += 1
+                num_user_turns += 1
+                in_turn = True
+                turn_had_call = False
+
             if message.get("_bfcl_rejected_tool_calls"):
                 has_invalid_tool_call = True
                 error_count += 1
+                rejected = message.get("_bfcl_rejected_tool_calls", []) or []
+                attempted_count = len(rejected) if isinstance(rejected, list) else 1
+                num_tool_calls_attempted += max(1, int(attempted_count))
+                turn_had_call = True
+
+            if role == "assistant":
+                accepted_calls = (
+                    message.get("tool_calls") or []
+                    if not message.get("_bfcl_rejected_tool_calls")
+                    else []
+                )
+                if accepted_calls:
+                    num_tool_calls_attempted += len(accepted_calls)
+                    num_tool_calls_accepted += len(accepted_calls)
+                    turn_had_call = True
 
             if role == "env" and _TOOL_ERROR_RE.search(str(message.get("content", ""))):
                 has_invalid_tool_call = True
                 error_count += 1
 
-            if role == "tool" and self._tool_result_has_error(message.get("content")):
-                has_tool_error = True
-                error_count += 1
+            if role == "tool":
+                if self._tool_result_has_error(message.get("content")):
+                    has_tool_error = True
+                    error_count += 1
+                else:
+                    num_tool_executions_no_error += 1
+
+        if in_turn and turn_had_call:
+            num_turns_with_tool_call += 1
 
         clean = bool(completed) and not has_invalid_tool_call and not has_tool_error
+
+        # Derived ratios (all in [0, 1]); default to 0 when no data. Consumed by
+        # bfcl_dense_env_grader.
+        turn_coverage = (
+            num_turns_with_tool_call / num_user_turns if num_user_turns > 0 else 0.0
+        )
+        accept_rate = (
+            num_tool_calls_accepted / num_tool_calls_attempted
+            if num_tool_calls_attempted > 0
+            else 0.0
+        )
+        exec_success_rate = (
+            num_tool_executions_no_error / num_tool_calls_accepted
+            if num_tool_calls_accepted > 0
+            else 0.0
+        )
+
         return {
             "clean": clean,
             "has_invalid_tool_call": has_invalid_tool_call,
             "has_tool_error": has_tool_error,
             "error_count": error_count,
+            "num_user_turns": num_user_turns,
+            "num_turns_with_tool_call": num_turns_with_tool_call,
+            "num_tool_calls_attempted": num_tool_calls_attempted,
+            "num_tool_calls_accepted": num_tool_calls_accepted,
+            "num_tool_executions_no_error": num_tool_executions_no_error,
+            "turn_coverage_rate": float(turn_coverage),
+            "tool_call_accept_rate": float(accept_rate),
+            "tool_exec_success_rate": float(exec_success_rate),
         }
 
     def _tool_result_has_error(self, content: Any) -> bool:

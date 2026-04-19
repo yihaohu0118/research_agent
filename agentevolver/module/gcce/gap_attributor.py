@@ -98,24 +98,54 @@ class GapAttributor:
             if count < self.min_samples:
                 continue
             current_success = float(item.get("success_rate", 0.0))
+            # F-Patch dense-reward average. When F-Patch is off this equals the
+            # success rate; when F-Patch is on it sits strictly above success
+            # rate whenever some trajectories collect partial credit.
+            reward_mean = float(item.get("reward_mean", current_success))
             failure_rate = max(0.0, 1.0 - current_success)
 
-            oracle_success = None
+            # ── Delta_E estimation ────────────────────────────────────────
+            # Preferred source: real oracle probe. Fallback source: F-Patch
+            # dense-reward mean as a proxy for "policy's score in E_t+F-oracle"
+            # minus "policy's score in E_t sparse" -- this is exactly the part
+            # of the failure gap that an improved environment alone can close.
+            # Degrades to 0 for GRPO (no F-patch) and to failure_rate when the
+            # oracle probe is wired up.
+            oracle_success: Optional[float] = None
+            delta_e_source = "none"
             if self.oracle_probe is not None:
                 oracle_success = self.oracle_probe.oracle_success_rate(category)
-                if oracle_success is None and self.oracle_probe.enabled:
-                    oracle_success = self.oracle_probe.prior()
-            delta_e_raw = (
-                max(0.0, oracle_success - current_success)
-                if oracle_success is not None
-                else failure_rate  # conservative fallback: assume oracle == 1.0
-            )
-
-            teacher_success = teacher_rates.get(category, (None, 0))[0] if teacher_rates else None
-            if teacher_success is None:
-                delta_pi_raw = failure_rate  # PACE-equivalent fallback
+                if oracle_success is not None:
+                    delta_e_source = "oracle_probe"
+            if oracle_success is not None:
+                delta_e_raw = max(0.0, oracle_success - current_success)
+            elif reward_mean > current_success + 1e-6:
+                delta_e_raw = min(failure_rate, reward_mean - current_success)
+                delta_e_source = "f_patch_reward_mean"
             else:
+                # No oracle data and no F-patch signal available. Set to 0 so
+                # the router concentrates all attribution mass on Delta_pi
+                # rather than splitting it equally with a fictitious Delta_E.
+                delta_e_raw = 0.0
+                delta_e_source = "zero_fallback"
+
+            # ── Delta_pi estimation ───────────────────────────────────────
+            # Preferred source: teacher cache. Fallback source: residual of
+            # the failure gap after subtracting Delta_E, i.e. the portion of
+            # the error that even a perfect environment cannot recover and
+            # therefore must be attributed to policy quality.
+            teacher_success = (
+                teacher_rates.get(category, (None, 0))[0] if teacher_rates else None
+            )
+            delta_pi_source = "none"
+            if teacher_success is not None:
                 delta_pi_raw = max(0.0, float(teacher_success) - current_success)
+                delta_pi_source = "teacher_cache"
+            else:
+                delta_pi_raw = max(0.0, failure_rate - delta_e_raw)
+                delta_pi_source = (
+                    "failure_residual" if delta_e_raw > 0 else "failure_rate"
+                )
 
             raw[category] = CategoryGap(
                 category=category,
@@ -126,6 +156,9 @@ class GapAttributor:
                 delta_e_raw=float(delta_e_raw),
                 delta_pi_raw=float(delta_pi_raw),
             )
+            # Stash provenance for logging; not part of the dataclass schema.
+            setattr(raw[category], "_delta_e_source", delta_e_source)
+            setattr(raw[category], "_delta_pi_source", delta_pi_source)
 
         if not raw:
             self.latest = {}
@@ -173,6 +206,18 @@ class GapAttributor:
                 result[f"{base}/teacher_success"] = float(gap.teacher_success)
             if gap.oracle_success is not None:
                 result[f"{base}/oracle_success"] = float(gap.oracle_success)
+            de_src = getattr(gap, "_delta_e_source", None)
+            dpi_src = getattr(gap, "_delta_pi_source", None)
+            if de_src:
+                # 0=none, 1=oracle_probe, 2=f_patch_reward_mean, 3=zero_fallback
+                result[f"{base}/delta_e_source_id"] = float(
+                    {"none": 0, "oracle_probe": 1, "f_patch_reward_mean": 2, "zero_fallback": 3}.get(de_src, 0)
+                )
+            if dpi_src:
+                # 0=none, 1=teacher_cache, 2=failure_residual, 3=failure_rate
+                result[f"{base}/delta_pi_source_id"] = float(
+                    {"none": 0, "teacher_cache": 1, "failure_residual": 2, "failure_rate": 3}.get(dpi_src, 0)
+                )
         return result
 
 

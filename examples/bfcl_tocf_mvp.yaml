@@ -81,7 +81,7 @@ actor_rollout_ref:
     off_cliprange_high: 1.0
     clip_ratio_c: 10.0
     grad_clip: 1.0
-    entropy_coeff: 0
+    entropy_coeff: 0.001
     ppo_micro_batch_size_per_gpu: 1
     ppo_mini_batch_size: 8
     ppo_max_token_len_per_gpu: 16384
@@ -107,7 +107,8 @@ env_service:
   env_url: "http://127.0.0.1:8082"
   env_feedin_preference: code
   bfcl:
-    strict_tool_parser: true
+    # Phase-1 universal hyperparameter (identical across all four rows).
+    strict_tool_parser: false
     enforce_available_tools: true
     tool_prompt_mode: t3rl_text
     tool_result_mode: plain_user
@@ -122,11 +123,6 @@ trainer:
   project_name: "bfcl_tocf"
   experiment_name: "bfcl_tocf_mvp"
   save_freq: 0
-  save_best_checkpoint: true
-  best_checkpoint_metric: null
-  best_checkpoint_mode: max
-  keep_only_best_checkpoint: true
-  save_best_checkpoint_in_val_only: false
   save_limit: 0
   test_freq: 10
   total_epochs: 10
@@ -208,7 +204,13 @@ tocf:
   feedback:
     dense_reward:
       enable: true
-      partial_credit_cap: 0.5
+      # Phase-2 real F-Patch. The grader now combines turn_coverage,
+      # accept_rate and exec_success_rate into a per-rollout partial_value
+      # in [0,1]. Passing trajectories always receive 1.0; non-passing
+      # trajectories receive min(cap, weight*partial_value). cap=0.7 gives
+      # a gradient visible on near-success rollouts without overwhelming
+      # the "fully correct" signal.
+      partial_credit_cap: 0.7
       partial_credit_weight: 1.0
       cap_decay: false
       min_cap: 0.1

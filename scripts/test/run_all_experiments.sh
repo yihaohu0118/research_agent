@@ -20,7 +20,6 @@ Options:
   --mode eval|train            eval uses trainer.val_only=true. Default: eval.
   --only PATTERN               Run experiment names containing PATTERN.
   --start-services             Start appworld/bfcl/reme services when needed.
-  --restart-services           Restart services through launcher before each experiment.
   --keep-services              Do not stop services started by this script.
   --continue-on-error          Keep running after a failed experiment.
   --skip-missing               Skip experiments whose required files are absent.
@@ -30,12 +29,10 @@ Options:
 
 Environment:
   PYTHON_BIN                   Python executable. Default: python3.
-  RUNNER                       launcher or direct. Default: launcher.
   LOG_ROOT                     Directory for logs. Default: experiments/run_all_experiments/<timestamp>.
   VAL_N                        Optional validation rollout count override, e.g. VAL_N=1.
   APPWORLD_PORT                Default: 8080.
   BFCL_PORT                    Default: 8082.
-  BFCL_SPLID_ID_PATH           Default for BFCL suite: data/bfcl_400_split.json.
   REME_PORT                    Default: 8001.
 
 Examples:
@@ -51,7 +48,6 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${PROJECT_ROOT}"
 
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-RUNNER="${RUNNER:-launcher}"
 APPWORLD_PORT="${APPWORLD_PORT:-8080}"
 BFCL_PORT="${BFCL_PORT:-8082}"
 REME_PORT="${REME_PORT:-8001}"
@@ -60,7 +56,6 @@ SUITE="core"
 MODE="eval"
 ONLY_PATTERN=""
 START_SERVICES=0
-RESTART_SERVICES=0
 KEEP_SERVICES=0
 CONTINUE_ON_ERROR=0
 SKIP_MISSING=0
@@ -83,11 +78,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --start-services|--with-services)
       START_SERVICES=1
-      shift
-      ;;
-    --restart-services|--reboot-services)
-      START_SERVICES=1
-      RESTART_SERVICES=1
       shift
       ;;
     --keep-services)
@@ -145,14 +135,6 @@ case "${MODE}" in
     ;;
 esac
 
-case "${RUNNER}" in
-  launcher|direct) ;;
-  *)
-    echo "Invalid RUNNER: ${RUNNER}" >&2
-    exit 2
-    ;;
-esac
-
 TIMESTAMP="$(date "+%Y%m%d_%H%M%S")"
 LOG_ROOT="${LOG_ROOT:-${PROJECT_ROOT}/experiments/run_all_experiments/${TIMESTAMP}}"
 SERVICE_LOG_DIR="${LOG_ROOT}/services"
@@ -166,9 +148,6 @@ if [[ -f "${PROJECT_ROOT}/.env" ]]; then
 fi
 
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
-if [[ "${SUITE}" == "bfcl" || "${SUITE}" == "core" ]]; then
-  export BFCL_SPLID_ID_PATH="${BFCL_SPLID_ID_PATH:-${BFCL_SPLIT_ID_PATH:-${PROJECT_ROOT}/data/bfcl_400_split.json}}"
-fi
 
 STARTED_PIDS=()
 
@@ -277,40 +256,6 @@ start_service() {
   wait_for_port "${service}" "${host}" "${port}" 180
 }
 
-launcher_service_flag() {
-  case "$1" in
-    appworld)
-      printf '%s\n' "--with-appworld"
-      ;;
-    bfcl)
-      printf '%s\n' "--with-bfcl"
-      ;;
-    reme)
-      printf '%s\n' "--with-reme"
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-service_port() {
-  case "$1" in
-    appworld)
-      printf '%s\n' "${APPWORLD_PORT}"
-      ;;
-    bfcl)
-      printf '%s\n' "${BFCL_PORT}"
-      ;;
-    reme)
-      printf '%s\n' "${REME_PORT}"
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
 missing_required_files() {
   local csv="$1"
   local -a files=()
@@ -395,56 +340,24 @@ run_experiment() {
     if [[ "${#services[@]}" -gt 0 ]]; then
       echo "[service] required: ${services[*]}"
     fi
-  elif [[ "${RUNNER}" == "direct" ]]; then
+  else
     local service
     for service in "${services[@]}"; do
       [[ -z "${service}" ]] && continue
       start_service "${service}"
-    done
-  elif [[ "${START_SERVICES}" != "1" ]]; then
-    local service
-    for service in "${services[@]}"; do
-      [[ -z "${service}" ]] && continue
-      local port
-      port="$(service_port "${service}")"
-      if ! port_is_open "127.0.0.1" "${port}"; then
-        echo "[service] ${service} is not reachable at 127.0.0.1:${port}" >&2
-        echo "[service] Start it manually or rerun with --start-services." >&2
-        return 1
-      fi
     done
   fi
 
   build_overrides
 
   local log_file="${LOG_ROOT}/${name}.log"
-  local -a cmd=()
-  if [[ "${RUNNER}" == "launcher" ]]; then
-    cmd=(
-      "${PYTHON_BIN}"
-      "${PROJECT_ROOT}/launcher.py"
-      --conf "${PROJECT_ROOT}/examples/${name}.yaml"
-    )
-    if [[ "${START_SERVICES}" == "1" ]]; then
-      if [[ "${RESTART_SERVICES}" == "1" ]]; then
-        cmd+=(--reboot)
-      fi
-      local service
-      for service in "${services[@]}"; do
-        [[ -z "${service}" ]] && continue
-        cmd+=("$(launcher_service_flag "${service}")")
-      done
-    fi
-    cmd+=("${OVERRIDES[@]}")
-  else
-    cmd=(
-      "${PYTHON_BIN}"
-      -m agentevolver.main_ppo
-      --config-path "${PROJECT_ROOT}/examples"
-      --config-name "${name}"
-      "${OVERRIDES[@]}"
-    )
-  fi
+  local -a cmd=(
+    "${PYTHON_BIN}"
+    -m agentevolver.main_ppo
+    --config-path "${PROJECT_ROOT}/examples"
+    --config-name "${name}"
+    "${OVERRIDES[@]}"
+  )
 
   echo "[experiment] log: ${log_file}"
   printf '[experiment] command:'
@@ -477,16 +390,19 @@ APPWORLD_EXPERIMENTS=(
   "overall|appworld,reme|"
 )
 
-# BFCL ablation ladder (same 400-train / 400-test split for all rows):
-#   bfcl_grpo       — pure GRPO, TOCF/PACE/GCCE off
-#   bfcl_tocf_mvp   — TOCF only (T+F patches), no PACE
-#   bfcl_tocf_pace  — TOCF + PACE (failure-rate advantage weighting)
-#   bfcl_gcce       — TOCF + GCCE (gap-conditioned routing; needs teacher cache)
+# BFCL ablation ladder (same 400-train / 400-test split for all rows; same
+# universal hyperparameters lr=3e-6, entropy_coeff=1e-3, total_epochs=15,
+# temperature=0.8, strict_tool_parser=false across all four rows):
+#   bfcl_grpo       — pure GRPO, no TOCF/PACE/GCCE patches
+#   bfcl_tocf_mvp   — TOCF (T-Patch category reweighting + F-Patch real dense reward)
+#   bfcl_tocf_pace  — TOCF + PACE (alpha=2, max_weight=5 failure-rate advantage weighting)
+#   bfcl_gcce       — TOCF + GCCE (CGA router; teacher OFF, Delta_E via F-Patch
+#                     reward-mean proxy; no external teacher_scores cache needed)
 BFCL_EXPERIMENTS=(
   "bfcl_grpo|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
   "bfcl_tocf_mvp|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
   "bfcl_tocf_pace|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
-  "bfcl_gcce|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet,data/teacher_scores_bfcl_400.json"
+  "bfcl_gcce|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
 )
 
 SELECTED_EXPERIMENTS=()
@@ -509,7 +425,6 @@ SKIPPED=()
 echo "[run_all] project: ${PROJECT_ROOT}"
 echo "[run_all] suite:   ${SUITE}"
 echo "[run_all] mode:    ${MODE}"
-echo "[run_all] runner:  ${RUNNER}"
 echo "[run_all] logs:    ${LOG_ROOT}"
 
 for spec in "${SELECTED_EXPERIMENTS[@]}"; do

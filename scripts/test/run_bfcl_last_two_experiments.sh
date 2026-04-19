@@ -17,14 +17,20 @@ Runs only:
   - bfcl_gcce
 
 Options:
-  --gcce-teacher-cache PATH     Append gcce.teacher.cache_path only for bfcl_gcce.
+  --gcce-teacher-cache PATH     Optional. Sets gcce.teacher.cache_path for
+                                bfcl_gcce only. Note: with the current
+                                bfcl_gcce.yaml gcce.teacher.enable=false, so
+                                this path is loaded but never queried unless
+                                you also pass +gcce.teacher.enable=true.
 
 Examples:
   bash scripts/test/run_bfcl_last_two_experiments.sh --dry-run
-  bash scripts/test/run_bfcl_last_two_experiments.sh --mode eval --restart-services
-  bash scripts/test/run_bfcl_last_two_experiments.sh --mode train --restart-services
-  bash scripts/test/run_bfcl_last_two_experiments.sh --mode train --restart-services \
-    --gcce-teacher-cache data/teacher_scores_bfcl_400_qwen3_4b_envtuning.json
+  bash scripts/test/run_bfcl_last_two_experiments.sh --mode eval --start-services
+  bash scripts/test/run_bfcl_last_two_experiments.sh --mode train --start-services
+  # If you ever do precompute a real teacher cache and want GCCE to use it:
+  bash scripts/test/run_bfcl_last_two_experiments.sh --mode train --start-services \
+    --gcce-teacher-cache data/teacher_scores_bfcl_400.json \
+    -- +gcce.teacher.enable=true
   VAL_N=1 bash scripts/test/run_bfcl_last_two_experiments.sh --mode eval --continue-on-error -- trainer.n_gpus_per_node=4
 
 Notes:
@@ -83,6 +89,12 @@ while [[ $# -gt 0 ]]; do
     --gcce-teacher-cache)
       GCCE_TEACHER_CACHE="${2:?missing value for --gcce-teacher-cache}"
       shift 2
+      ;;
+    --restart-services|--reboot-services)
+      # Current run_all_experiments.sh supports --start-services. Keep this
+      # alias so older commands keep working with the pair wrapper.
+      FORWARDED_ARGS+=(--start-services)
+      shift
       ;;
     --continue-on-error)
       CONTINUE_ON_ERROR=1
