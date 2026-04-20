@@ -140,7 +140,7 @@ trainer:
   project_name: "bfcl_gcce_full"
   experiment_name: "bfcl_gcce_full_400x400"
   save_freq: 0
-  save_best_checkpoint: true
+  save_best_checkpoint: false
   keep_only_best_checkpoint: true
   save_limit: 0
   test_freq: 10
