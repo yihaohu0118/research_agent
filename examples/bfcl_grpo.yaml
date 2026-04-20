@@ -132,6 +132,8 @@ trainer:
   project_name: "bfcl_grpo_baseline"
   experiment_name: "bfcl_grpo_baseline"
   save_freq: 0
+  save_best_checkpoint: true
+  keep_only_best_checkpoint: true
   save_limit: 0
   test_freq: 10
   total_epochs: 10
