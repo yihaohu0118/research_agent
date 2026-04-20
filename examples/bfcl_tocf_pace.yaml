@@ -82,7 +82,8 @@ actor_rollout_ref:
     off_cliprange_high: 1.0
     clip_ratio_c: 10.0
     grad_clip: 1.0
-    entropy_coeff: 0.001
+    # Universal hyperparameter. Reverted to 0 per user request.
+    entropy_coeff: 0
     ppo_micro_batch_size_per_gpu: 1
     ppo_mini_batch_size: 8
     ppo_max_token_len_per_gpu: 16384
@@ -107,8 +108,9 @@ env_service:
   env_url: "http://127.0.0.1:8082"
   env_feedin_preference: code
   bfcl:
-    # Phase-1 universal hyperparameter (identical across all four rows).
-    strict_tool_parser: false
+    # Universal hyperparameter. Re-enabled so training and evaluation share
+    # the same tool-call parser.
+    strict_tool_parser: true
     enforce_available_tools: true
     tool_prompt_mode: t3rl_text
     tool_result_mode: plain_user
@@ -212,16 +214,13 @@ pace:
     dump_dir: experiments/bfcl_tocf_pace/tocf_stats
   advantage_weighting:
     enable: true
-    # With alpha=0.5 and max=2 the clipped weight for rho≈0.74 was 1.37,
-    # i.e. nearly uniform. Under a heavy-tailed failure distribution PACE
-    # needs a strictly stronger lever to be distinguishable from GRPO.
-    # alpha=2.0, max=5.0 gives w=1+2*0.74=2.48 for a typical failed category
-    # and saturates at 5.0 only for near-catastrophic ones. This matches the
-    # regime in which PACE's "rare successes in hard categories get amplified"
-    # story actually bites.
-    alpha: 2.0
+    # Dialed back to alpha=0.5 / max_weight=2.0 now that the dense reward is
+    # outcome-aligned (per-turn progress). With a low-noise reward, aggressive
+    # PACE amplification is no longer needed and was empirically destabilising
+    # training in the previous run (27.25% peak, then drift down to 22%).
+    alpha: 0.5
     min_weight: 1.0
-    max_weight: 5.0
+    max_weight: 2.0
     min_samples: 8
     stats_scope: window
     apply_to: positive_advantage

@@ -52,6 +52,14 @@ from bfcl_eval.utils import (
     load_file,
 )
 
+# Per-user-turn progress scorer (EnvTuning-style outcome-aligned dense reward).
+try:
+    from .multi_turn_progress import safe_compute_progress as _bfcl_safe_progress
+except ImportError:  # pragma: no cover - absolute import fallback
+    from env_service.environments.bfcl.multi_turn_progress import (
+        safe_compute_progress as _bfcl_safe_progress,
+    )
+
 
 
 # monkey patch to locate a possible answer path.
@@ -516,6 +524,9 @@ class EnvHandler:
                 state["leaderboard_table"], model_name, [model_result_data]
             )
 
+            _progress_value: Optional[float] = None
+            _progress_info: Optional[Dict[str, Any]] = None
+
             if is_relevance_or_irrelevance(category):
                 accuracy, total_count = self._eval_relevance_test(
                     handler, model_result_data, prompt_data, model_name, category
@@ -538,6 +549,18 @@ class EnvHandler:
                         possible_answer,
                         model_name,
                         category,
+                    )
+                    # Per-user-turn outcome progress (EnvTuning-style). This is
+                    # the dense reward signal consumed by BfclDenseEnvGrader.
+                    # Using the SAME checkers as the binary runner, so the
+                    # progress number is monotone-aligned with final accuracy.
+                    _progress_value, _progress_info = _bfcl_safe_progress(
+                        handler=handler,
+                        model_result_data=model_result_data,
+                        possible_answer=possible_answer,
+                        prompt_entry=original_test_entry,
+                        test_category=category,
+                        model_name=model_name,
                     )
                 else:
                     accuracy, total_count = self._eval_single_turn_test(
@@ -570,6 +593,20 @@ class EnvHandler:
                 completed=conversation_result.get("completed", False),
             )
             clean_accuracy = accuracy if diagnostics["clean"] else 0.0
+
+            # Per-user-turn outcome progress (primary dense reward signal).
+            # We emit both a compact float used by the grader and a small info
+            # blob (per-turn valid list, error tags) useful for offline study.
+            if _progress_value is not None:
+                result["bfcl_progress"] = float(_progress_value)
+                if isinstance(_progress_info, dict):
+                    result["bfcl_progress_info"] = {
+                        "per_turn_valid": _progress_info.get("per_turn_valid"),
+                        "passed_turns": _progress_info.get("passed_turns"),
+                        "scorable_turns": _progress_info.get("scorable_turns"),
+                        "terminated_early": _progress_info.get("terminated_early"),
+                        "error": _progress_info.get("error"),
+                    }
             result.update(
                 {
                     "clean_accuracy": clean_accuracy,
@@ -646,6 +683,8 @@ class EnvHandler:
             "correct_count": 0,
             "test_id": test_id,
             "model_name": self.model_name,
+            # Progress defaults so downstream graders always find the key.
+            "bfcl_progress": 0.0,
         }
 
     def _diagnose_trajectory(
