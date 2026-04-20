@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Run the last two BFCL experiments from run_all_experiments.sh:
+# Run the last two experiments from the original four-row BFCL ladder.
+# In the expanded six-row ladder these are the middle pair:
 #   1. bfcl_tocf_pace
 #   2. bfcl_gcce
 #
 # All normal run_all_experiments.sh options are forwarded, except --suite and
-# --only are owned by this wrapper.
+# --only/--only-exact are owned by this wrapper.
 set -euo pipefail
 
 usage() {
@@ -34,7 +35,7 @@ Examples:
   VAL_N=1 bash scripts/test/run_bfcl_last_two_experiments.sh --mode eval --continue-on-error -- trainer.n_gpus_per_node=4
 
 Notes:
-  Do not pass --suite or --only; this wrapper fixes them to the last two BFCL experiments.
+  Do not pass --suite, --only, or --only-exact; this wrapper fixes them to the original four-row ladder's last two BFCL experiments.
   Global Hydra overrides after -- are forwarded to both experiments. Use
   --gcce-teacher-cache for GCCE-only teacher-cache overrides.
   LOG_ROOT defaults to experiments/run_bfcl_last_two_experiments/<timestamp>.
@@ -81,7 +82,7 @@ while [[ $# -gt 0 ]]; do
       usage
       exit 0
       ;;
-    --suite|--only)
+    --suite|--only|--only-exact)
       echo "ERROR: $1 is managed by this wrapper; do not pass it." >&2
       usage >&2
       exit 2
@@ -138,7 +139,7 @@ for exp_name in "${EXPERIMENTS[@]}"; do
   echo "[run_bfcl_last_two] ${exp_name}"
   echo "############################################################"
 
-  cmd=(bash "${RUN_ALL}" --suite bfcl --only "${exp_name}" "${FORWARDED_ARGS[@]}")
+  cmd=(bash "${RUN_ALL}" --suite bfcl --only-exact "${exp_name}" "${FORWARDED_ARGS[@]}")
   if [[ "${exp_name}" == "bfcl_gcce" && -n "${GCCE_TEACHER_CACHE}" ]]; then
     if forwarded_has_hydra_separator; then
       cmd+=("gcce.teacher.cache_path=${GCCE_TEACHER_CACHE}")

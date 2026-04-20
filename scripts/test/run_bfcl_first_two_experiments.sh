@@ -4,7 +4,7 @@
 #   2. bfcl_tocf_mvp
 #
 # All normal run_all_experiments.sh options are forwarded, except --suite and
-# --only are owned by this wrapper.
+# --only/--only-exact are owned by this wrapper.
 set -euo pipefail
 
 usage() {
@@ -23,7 +23,7 @@ Examples:
   VAL_N=1 bash scripts/test/run_bfcl_first_two_experiments.sh --mode eval --continue-on-error -- trainer.n_gpus_per_node=4
 
 Notes:
-  Do not pass --suite or --only; this wrapper fixes them to the first two BFCL experiments.
+  Do not pass --suite, --only, or --only-exact; this wrapper fixes them to the first two BFCL experiments.
   LOG_ROOT defaults to experiments/run_bfcl_first_two_experiments/<timestamp>.
 EOF
 }
@@ -46,7 +46,7 @@ while [[ $# -gt 0 ]]; do
       usage
       exit 0
       ;;
-    --suite|--only)
+    --suite|--only|--only-exact)
       echo "ERROR: $1 is managed by this wrapper; do not pass it." >&2
       usage >&2
       exit 2
@@ -100,7 +100,7 @@ for exp_name in "${EXPERIMENTS[@]}"; do
   echo "############################################################"
 
   set +e
-  bash "${RUN_ALL}" --suite bfcl --only "${exp_name}" "${FORWARDED_ARGS[@]}"
+  bash "${RUN_ALL}" --suite bfcl --only-exact "${exp_name}" "${FORWARDED_ARGS[@]}"
   status="$?"
   set -e
 

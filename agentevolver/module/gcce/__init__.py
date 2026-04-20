@@ -22,6 +22,13 @@ from .gap_attributor import CategoryGap, GapAttributor
 from .router import GCCERouter, RouteDecision
 from .teacher_cache import TeacherCache
 from .oracle_probe import OracleProbe, OracleProbeResult
+from .hindsight_attributor import (
+    AttributionResult,
+    GapType,
+    HindsightAttributionRouter,
+    compute_attribution_metrics,
+    hindsight_enabled,
+)
 
 
 def __getattr__(name):
@@ -46,6 +53,11 @@ __all__ = [
     "TeacherCache",
     "OracleProbe",
     "OracleProbeResult",
+    "AttributionResult",
+    "GapType",
+    "HindsightAttributionRouter",
+    "compute_attribution_metrics",
+    "hindsight_enabled",
     "apply_gcce_advantage_weighting",
     "gcce_advantage_weighting_enabled",
     "gcce_enabled",

@@ -19,6 +19,7 @@ Options:
   --suite core|appworld|bfcl   Which experiment group to run. Default: core.
   --mode eval|train            eval uses trainer.val_only=true. Default: eval.
   --only PATTERN               Run experiment names containing PATTERN.
+  --only-exact NAME            Run exactly one experiment name.
   --start-services             Start appworld/bfcl/reme services when needed.
   --keep-services              Do not stop services started by this script.
   --continue-on-error          Keep running after a failed experiment.
@@ -55,6 +56,7 @@ REME_PORT="${REME_PORT:-8001}"
 SUITE="core"
 MODE="eval"
 ONLY_PATTERN=""
+ONLY_EXACT=""
 START_SERVICES=0
 KEEP_SERVICES=0
 CONTINUE_ON_ERROR=0
@@ -74,6 +76,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --only)
       ONLY_PATTERN="${2:?missing value for --only}"
+      shift 2
+      ;;
+    --only-exact)
+      ONLY_EXACT="${2:?missing value for --only-exact}"
       shift 2
       ;;
     --start-services|--with-services)
@@ -312,6 +318,9 @@ run_experiment() {
   if [[ -n "${ONLY_PATTERN}" && "${name}" != *"${ONLY_PATTERN}"* ]]; then
     return 0
   fi
+  if [[ -n "${ONLY_EXACT}" && "${name}" != "${ONLY_EXACT}" ]]; then
+    return 0
+  fi
 
   echo
   echo "============================================================"
@@ -391,18 +400,30 @@ APPWORLD_EXPERIMENTS=(
 )
 
 # BFCL ablation ladder (same 400-train / 400-test split for all rows; same
-# universal hyperparameters lr=3e-6, entropy_coeff=1e-3, total_epochs=15,
-# temperature=0.8, strict_tool_parser=false across all four rows):
-#   bfcl_grpo       — pure GRPO, no TOCF/PACE/GCCE patches
-#   bfcl_tocf_mvp   — TOCF (T-Patch category reweighting + F-Patch real dense reward)
-#   bfcl_tocf_pace  — TOCF + PACE (alpha=2, max_weight=5 failure-rate advantage weighting)
-#   bfcl_gcce       — TOCF + GCCE (CGA router; teacher OFF, Delta_E via F-Patch
-#                     reward-mean proxy; no external teacher_scores cache needed)
+# universal hyperparameters lr=1e-6, entropy_coeff=0, total_epochs=10,
+# temperature=1.0, strict_tool_parser=true across every row):
+#   bfcl_grpo             — pure GRPO, no TOCF/PACE/GCCE patches
+#   bfcl_tocf_mvp         — TOCF (T-Patch category reweighting + F-Patch
+#                           outcome-aligned EnvTuning-style dense reward)
+#   bfcl_tocf_pace        — TOCF + PACE (alpha=0.5, max_weight=2.0 failure-
+#                           rate advantage weighting)
+#   bfcl_gcce             — TOCF + GCCE with HEURISTIC CGA
+#                           (Delta_E from F-Patch reward mean, Delta_pi from
+#                           failure-rate residual; no teacher, no oracle)
+#   bfcl_gcce_hindsight   — TOCF + GCCE with ON-POLICY hindsight attribution
+#                           (SEAL §3.4.1). Only addition vs. bfcl_gcce is the
+#                           reflection-based (cap_gap_rate, env_gap_rate).
+#   bfcl_gcce_full        — bfcl_gcce_hindsight + SEAL cap-gap explorer
+#                           buffer & metrics (Stage 1). Use this row to
+#                           measure how much identifiable attribution +
+#                           cap-gap signal contribute on top of GCCE.
 BFCL_EXPERIMENTS=(
   "bfcl_grpo|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
   "bfcl_tocf_mvp|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
   "bfcl_tocf_pace|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
   "bfcl_gcce|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
+  "bfcl_gcce_hindsight|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
+  "bfcl_gcce_full|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
 )
 
 SELECTED_EXPERIMENTS=()
