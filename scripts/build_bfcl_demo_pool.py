@@ -72,10 +72,10 @@ PLACEHOLDER_TOOL_RESULT = {"status": "ok"}
 # ---------------------------------------------------------------------------
 # Env-format alignment (CRITICAL)
 # ---------------------------------------------------------------------------
-# The SFT warm-start has to see the **same** system prompt + tool-result
+# Offline demos have to preserve the **same** system prompt + tool-result
 # formatting that the BFCL env streams to the model at rollout/eval
-# time. Otherwise the policy learns a format that does not exist at
-# deployment and validation score collapses to 0.
+# time. Otherwise any downstream consumer learns a format that does not
+# exist at deployment and validation score collapses to 0.
 #
 # Both pieces below are a **frozen copy** of:
 #   env_service/environments/bfcl/bfcl_env.py
@@ -83,8 +83,8 @@ PLACEHOLDER_TOOL_RESULT = {"status": "ok"}
 #     - ``tools_schema_to_qwen_prompt(..., prompt_mode="t3rl_text")``
 #     - ``tool_message_to_qwen_text(..., result_mode="plain_user")``
 #
-# If that file changes, mirror the change here or the SFT pool will
-# start drifting again. We intentionally do *not* import from
+# If that file changes, mirror the change here or the offline demo pool
+# will start drifting again. We intentionally do *not* import from
 # env_service because this script is a purely offline data prep tool
 # and env_service pulls in the whole BFCL eval stack.
 _T3RL_BFCL_SYSTEM_PROMPT = """You are an expert in composing functions. You are given a question and a set of possible functions. Based on the question, you will need to make one or more function/tool calls to achieve the purpose.
@@ -373,10 +373,9 @@ def _render_tool_result_turn(gold_calls: list[str]) -> str:
     """Render a synthetic user-role tool-result block.
 
     Matches the **env's** ``tool_message_to_qwen_text(result_mode="plain_user")``
-    format exactly so that at SFT time the model sees the same boundary
-    tokens between its own assistant output and the subsequent user
-    message as it does at rollout time. Divergence here is what killed
-    the previous SFT run: the env emits
+    format exactly so offline demos preserve the same boundary tokens
+    between assistant output and the subsequent user message as at
+    rollout time. The env emits
     ``"Tool result from <name>:\\n<content>\\n"`` between turns, and any
     other shape (``[TOOL_RESULTS]\\n...``, JSON-wrapped, etc.) makes the
     policy learn a distribution that simply does not exist at
@@ -425,8 +424,9 @@ def build_demo_for_row(
     # Compose the system prompt via the env's own recipe. This is the
     # text the BFCL env feeds the policy at rollout/eval time via
     # ``BfclEnv.get_init_state`` -> ``tools_schema_to_qwen_prompt(...,
-    # prompt_mode="t3rl_text")``. SFT MUST see the same string or the
-    # policy goes out of distribution and val score collapses to 0.
+    # prompt_mode="t3rl_text")``. Offline demos must preserve the same
+    # string or the policy goes out of distribution and val score
+    # collapses to 0.
     system_prompt = _tools_schema_to_qwen_prompt_t3rl(tools)
 
     while len(user_questions) < len(gold_turns):
