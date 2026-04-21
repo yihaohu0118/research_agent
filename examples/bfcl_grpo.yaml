@@ -18,7 +18,7 @@ defaults:
 
 # ── Data ──────────────────────────────────────────────────────────────────────
 data:
-  # Same 400/400 stratified split as bfcl_tocf_* / bfcl_gcce for fair comparison.
+  # Same 400/400 stratified split as bfcl_tocf_* for fair comparison.
   train_files: data/bfcl_train_400.parquet
   val_files: data/bfcl_test_400.parquet
   train_batch_size: 16
@@ -198,8 +198,3 @@ tocf:
   feedback:
     dense_reward:
       enable: false
-
-pace:
-  enable: false
-  advantage_weighting:
-    enable: false

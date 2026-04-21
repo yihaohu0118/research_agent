@@ -445,6 +445,17 @@ class ParallelEnvManager(object):
             "task_train_expmode": cmt.metadata.get("task_train_exp_mode", None),  # ⭐ Retrieves the 'task_train_exp_mode' value from metadata
             "experience_list": cmt.metadata.get("experience_list", [])  # ⭐ Retrieves the 'experience' list from metadata
         }
+        # A-Patch: expose per-turn BFCL failure tags for tag-aware advantage
+        # weighting.  The tags live in the grader's reward metadata, which is
+        # stored on the trajectory reward object rather than on trajectory
+        # metadata. We read them here so they travel with the batch extras.
+        reward_meta = (
+            getattr(getattr(cmt, "reward", None), "metadata", None) or {}
+        )
+        progress_info = reward_meta.get("bfcl_dense_progress_info", {}) or {}
+        failure_tags = progress_info.get("failure_tags") or []
+        if failure_tags:
+            extras["bfcl_failure_tags"] = list(failure_tags)
         return extras
 
 

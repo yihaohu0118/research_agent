@@ -288,27 +288,3 @@ tocf:
       partial_credit_weight: 1.0
       cap_decay: false
       min_cap: 0.1
-
-pace:
-  # Policy Adaptation from Co-evolving Environments.
-  # This keeps the environment fixed during the policy update, but lets the
-  # policy optimizer consume curriculum signals collected from recent rollouts.
-  enable: false
-  stats:
-    dump_dir: null
-  advantage_weighting:
-    enable: false
-    # weight(category) = clamp(1 + alpha * failure_rate(category), min_weight, max_weight)
-    alpha: 0.5
-    min_weight: 1.0
-    max_weight: 2.0
-    min_samples: 8
-    # "window" uses the current epoch window; "total" uses all observed rollouts.
-    stats_scope: window
-    # "positive_advantage" avoids amplifying negative gradients in hard categories.
-    # Other options: "positive_reward", "successful_reward", "all".
-    apply_to: positive_advantage
-    advantage_threshold: 0.0
-    reward_threshold: 0.0
-    success_reward_threshold: 1.0
-    metric_prefix: pace/advantage_weighting

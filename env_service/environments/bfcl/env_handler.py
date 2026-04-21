@@ -600,10 +600,34 @@ class EnvHandler:
             if _progress_value is not None:
                 result["bfcl_progress"] = float(_progress_value)
                 if isinstance(_progress_info, dict):
+                    # T3RL-style metric that also scores irrelevance turns.
+                    # Falls back to the legacy ``progress`` when the progress
+                    # scorer does not emit it (older cache entries).
+                    pwi = _progress_info.get("progress_with_irrelevance")
+                    if pwi is not None:
+                        result["bfcl_progress_with_irrelevance"] = float(pwi)
+                    else:
+                        result["bfcl_progress_with_irrelevance"] = float(
+                            _progress_value
+                        )
                     result["bfcl_progress_info"] = {
                         "per_turn_valid": _progress_info.get("per_turn_valid"),
+                        "irrelevance_per_turn": _progress_info.get(
+                            "irrelevance_per_turn"
+                        ),
+                        # A-Patch: structured per-turn failure tags. One string
+                        # per GT turn. Tag vocabulary:
+                        #   "pass", "correct_abstention", "spurious_tool_call",
+                        #   "empty_turn_model_response", "state_mismatch",
+                        #   "instance_mismatch", "response_mismatch",
+                        #   "checker_error", "gt_error"
+                        "failure_tags": _progress_info.get("failure_tags", []),
                         "passed_turns": _progress_info.get("passed_turns"),
                         "scorable_turns": _progress_info.get("scorable_turns"),
+                        "passed_irrelevance_turns": _progress_info.get(
+                            "passed_irrelevance_turns"
+                        ),
+                        "irrelevance_turns": _progress_info.get("irrelevance_turns"),
                         "terminated_early": _progress_info.get("terminated_early"),
                         "error": _progress_info.get("error"),
                     }

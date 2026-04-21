@@ -1,0 +1,280 @@
+# A-Patch + GRPO on BFCL v3 multi-turn.
+#
+# This is the isolated A-Patch ablation row: tag-aware advantage weighting is
+# the ONLY intervention on top of vanilla GRPO. Reward stays binary (0/1),
+# but each rollout's advantages are scaled by a factor derived from the
+# distribution of per-turn failure tags, amplifying the learning signal for
+# the most actionable failure modes.
+#
+# Ablation position:
+#   - vs bfcl_grpo.yaml        : isolates the value of structured failure-mode
+#                                feedback on advantages under uniform sampling.
+#   - vs bfcl_tocf_fpatch.yaml : A-Patch = "which turns failed and how" (loss
+#                                side); F-Patch = "how much progress was made"
+#                                (reward side). Orthogonal signals.
+#   - vs bfcl_tocf_tpatch.yaml : T-Patch = "which categories to sample more";
+#                                A-Patch = "scale gradient by failure mode".
+#
+# Design notes:
+#   1. Binary reward is preserved.  We use bfcl-dense-env grader with
+#      partial_credit_cap=0.0 so the reward is 1.0 on pass and 0.0 on fail,
+#      identical to bfcl_grpo.yaml.  The grader also computes bfcl_progress_info
+#      (which carries failure_tags) as a by-product, making the tag signal
+#      available without changing the reward.
+#
+#   2. Tag taxonomy (7 actionable + 2 excluded).  Per-turn tags emitted by
+#      multi_turn_progress.py:
+#        spurious_tool_call    — miss_func: model called tools on irrelevance turn
+#        correct_abstention    — miss_func: model correctly abstained
+#        empty_turn_model_response — model failed to act on a scorable turn
+#        state_mismatch        — executed tools but final state wrong
+#        response_mismatch     — state OK but response check failed
+#        instance_mismatch     — wrong instance (causally ambiguous)
+#        pass                  — turn passed
+#        checker_error / gt_error — excluded (scorer issues, not model failures)
+#
+#   3. Weighting formula.
+#        fractions = {tag: count/len(tags)}  # exclude checker_error, gt_error
+#        scale_i = clamp(Σ fractions[t] * weight[t], min_scale, max_scale)
+#        advantages_i *= scale_i
+#      All samples are scaled (apply_to: all), which means both negative
+#      advantages (failures) and positive advantages (passes) are amplified
+#      when the trajectory's dominant tag warrants it.  For example, a passing
+#      trajectory on a miss_func task will have many correct_abstention tags
+#      → scale ≈ 1.8 → stronger positive gradient for the abstain behaviour.
+#
+#   4. apply_to: all.  Scaling both signs preserves the relative magnitude
+#      between same-group trajectories while making high-signal failure-mode
+#      trajectories contribute more to the policy update than low-signal ones.
+#
+# Tag weights (defaults in apatch.py; overridden here for transparency):
+#   spurious_tool_call:           2.0  (sharpest, unambiguous miss_func failure)
+#   correct_abstention:           1.8  (reinforce the correct abstain behaviour)
+#   empty_turn_model_response:    1.5  (clear: model should have acted, didn't)
+#   state_mismatch:               1.0  (neutral: general functional error)
+#   response_mismatch:            0.9  (slight: got function right, detail wrong)
+#   instance_mismatch:            0.6  (lower: causally ambiguous)
+#   pass:                         1.0  (neutral)
+
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
+defaults:
+  - ppo_trainer
+  - agentevolver
+  - _self_
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+data:
+  train_files: data/bfcl_train_400.parquet
+  val_files: data/bfcl_test_400.parquet
+  train_batch_size: 16
+  max_prompt_length: 8192
+  max_response_length: 4096
+  return_raw_chat: true
+  filter_overlong_prompts: false
+  truncation: "error"
+  val_batch_size: 256
+  val_type: "val"
+
+# ── Algorithm: standard GRPO ──────────────────────────────────────────────────
+algorithm:
+  gamma: 1.0
+  lam: 1.0
+  adv_estimator: grpo
+  use_kl_in_reward: false
+  kl_penalty: kl
+  kl_ctrl:
+    type: fixed
+    kl_coef: 0.0
+
+# ── Actor / rollout / ref ─────────────────────────────────────────────────────
+actor_rollout_ref:
+  hybrid_engine: true
+  model:
+    path: Qwen/Qwen2.5-7B-Instruct
+    use_remove_padding: true
+    enable_gradient_checkpointing: true
+  rollout:
+    name: vllm
+    mode: async
+    temperature: 1.0
+    n: 8
+    prompt_length: ${data.max_prompt_length}
+    response_length: ${data.max_response_length}
+    max_model_len: 16384
+    gpu_memory_utilization: 0.6
+    tensor_model_parallel_size: 1
+    log_prob_micro_batch_size_per_gpu: 1
+    log_prob_max_token_len_per_gpu: 16384
+    val_kwargs:
+      n: 1
+      temperature: 0
+    multi_turn:
+      enable: true
+      format: llama3_json
+      max_steps: 20
+      completion_callback: agentevolver.module.trainer.simple_completion_callback.SimpleCompletionCallback
+      tool_config_path: ""
+    max_env_worker: 32
+    sparse: true
+  actor:
+    optim:
+      lr: 1e-6
+    use_kl_loss: true
+    kl_loss_coef: 0.001
+    kl_loss_type: low_var_kl
+    clip_ratio: 0.2
+    clip_ratio_low: 0.2
+    clip_ratio_high: 0.2
+    off_cliprange_high: 1.0
+    clip_ratio_c: 10.0
+    grad_clip: 1.0
+    entropy_coeff: 0
+    ppo_micro_batch_size_per_gpu: 1
+    ppo_mini_batch_size: 8
+    ppo_max_token_len_per_gpu: 16384
+    loss_agg_mode: token-mean
+    fsdp_config:
+      param_offload: false
+      optimizer_offload: false
+  ref:
+    log_prob_micro_batch_size_per_gpu: 1
+    log_prob_max_token_len_per_gpu: 16384
+    fsdp_config:
+      param_offload: true
+
+critic:
+  grad_clip: 1.0
+  cliprange_value: 0.5
+  ppo_max_token_len_per_gpu: 16384
+  forward_max_token_len_per_gpu: 16384
+
+# ── Environment ───────────────────────────────────────────────────────────────
+env_service:
+  env_type: "bfcl"
+  env_url: "http://127.0.0.1:8082"
+  env_feedin_preference: code
+  bfcl:
+    strict_tool_parser: true
+    enforce_available_tools: true
+    tool_prompt_mode: t3rl_text
+    tool_result_mode: plain_user
+    eval_policy: clean
+
+# ── Trainer ───────────────────────────────────────────────────────────────────
+trainer:
+  n_gpus_per_node: 4
+  nnodes: 1
+  critic_warmup: 0
+  logger: ["console"]
+  project_name: bfcl_tocf_apatch
+  experiment_name: bfcl_apatch_grpo_400x400
+  save_freq: 0
+  save_best_checkpoint: false
+  keep_only_best_checkpoint: true
+  save_limit: 0
+  test_freq: 10
+  total_epochs: 10
+  val_before_train: true
+  val_only: false
+
+# ── AgentEvolver task manager ─────────────────────────────────────────────────
+task_manager:
+  n: 0
+  train_data_path: tasks_explored.train.json
+  val_data_path: tasks_explored.val.json
+  llm_client: qwen-plus
+  env_profile: cookbook/env_profiles/bfcl.json
+  bs: ${data.train_batch_size}
+  num_explore_threads: ${thread_pool.max_workers}
+  mixture:
+    use_original_tasks: true
+    synthetic_data_ratio: 0.0
+    shuffle: true
+  grader:
+    # bfcl-dense-env is required so bfcl_progress_info (incl. failure_tags) is
+    # computed and stored in the grader's reward metadata.  The cap is set to
+    # 0.0 so the actual reward remains binary: 1.0 on pass, 0.0 on fail.
+    original_grader: bfcl-dense-env
+    synthetic_grader: llm-binary-gt-no_constraint
+  strategy: random
+  strategy_args:
+    max_explore_step: 30
+    max_llm_retries: 6
+    env_url: ${env_service.env_url}
+    exploration_llm_temperature: 1.0
+    exploration_llm_top_p: 1.0
+    exploration_llm_top_k: 100
+
+# ── Experience management OFF ─────────────────────────────────────────────────
+exp_manager:
+  val_rollout_mode: "woexp"
+  train_rollout_mode: "woexp"
+  rollout_ratio: 0.0
+  train_sample_mode: "alldiscard"
+  train_sample_keepratio: 1.0
+  experience_template: "\n\nSome Related Experience to help you to complete the task:<EXP>{}</EXP>\n\n"
+  init_exp_before_training: false
+  init_exp_only: false
+  summary_batch_size: 8
+  reme:
+    base_url: "http://127.0.0.1:8001"
+    workspace_id: "default"
+    enable_summarizer: false
+    enable_context_generator: false
+    retrieve_top_k: 3
+    updated_freq: 0
+
+attribution_driven_credit_assignment:
+  enable: false
+
+# ── TOCF: A-Patch only ────────────────────────────────────────────────────────
+tocf:
+  enable: true
+  stats:
+    enable: false
+
+  # T-Patch OFF: uniform category sampling, same as bfcl_grpo.yaml.
+  task_distribution:
+    enable: false
+
+  # C-Patch OFF: no query suffix injection.
+  query_suffix:
+    enable: false
+    apply_to_validation: false
+
+  # F-Patch: enabled ONLY to trigger bfcl_progress_info computation.
+  # partial_credit_cap = 0.0 keeps the reward binary (0 on fail, 1 on pass).
+  feedback:
+    dense_reward:
+      enable: true
+      mode: capped
+      partial_credit_cap: 0.0
+      partial_credit_weight: 1.0
+      cap_decay: false
+      min_cap: 0.0
+
+  # A-Patch ON: tag-aware advantage weighting.
+  advantage:
+    apatch:
+      enable: true
+      min_scale: 0.5
+      max_scale: 2.0
+      # Scale both positive and negative advantages. This amplifies the whole
+      # trajectory's gradient signal proportional to how "informative" the
+      # failure mode is. Passing trajectories with many correct_abstention
+      # turns get a stronger positive push; failing trajectories dominated by
+      # spurious_tool_call get a stronger negative push.
+      apply_to: all
+      metric_prefix: tocf/apatch
+      tag_weights:
+        spurious_tool_call: 2.0
+        correct_abstention: 1.8
+        empty_turn_model_response: 1.5
+        state_mismatch: 1.0
+        response_mismatch: 0.9
+        instance_mismatch: 0.6
+        pass: 1.0

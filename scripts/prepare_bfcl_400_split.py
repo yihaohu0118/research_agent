@@ -12,8 +12,8 @@ Usage::
 Stratification key is the BFCL category inferred from ``extra_info.original_id``
 (multi_turn_base / multi_turn_miss_param / multi_turn_miss_func /
 multi_turn_long_context). We balance categories so each split has roughly
-proportional representation, which is essential for the GCCE router to have
-meaningful per-category Delta_E / Delta_pi estimates with 400 samples.
+proportional representation, which keeps per-category metrics (success
+rate, progress, etc.) statistically meaningful with 400 samples.
 """
 from __future__ import annotations
 

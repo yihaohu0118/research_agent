@@ -19,10 +19,7 @@ PROJECT_ROOT="$(cd "$LAUNCH_SCRIPT_DIR/../../" && pwd)"
 DEFAULT_BFCL_ENV_DIR="$ENV_SERVICE_DIR/environments/bfcl"
 BFCL_ENV_DIR=${BFCL_ENV_DIR:-$DEFAULT_BFCL_ENV_DIR}
 DEFAULT_BFCL_DATA_PATH="$BFCL_ENV_DIR/bfcl_data/multi_turn_processed.jsonl"
-DEFAULT_BFCL_SPLID_ID_PATH="$BFCL_ENV_DIR/bfcl_data/multi_turn_envtuning_train200_test600_split_ids.json"
-if [ -f "$PROJECT_ROOT/data/bfcl_400_split.json" ]; then
-    DEFAULT_BFCL_SPLID_ID_PATH="$PROJECT_ROOT/data/bfcl_400_split.json"
-fi
+DEFAULT_BFCL_SPLID_ID_PATH="$PROJECT_ROOT/data/bfcl_400_split.json"
 
 export ENV_PATH="$BFCL_ENV_DIR"
 export BFCL_DATA_PATH="${BFCL_DATA_PATH:-$DEFAULT_BFCL_DATA_PATH}"

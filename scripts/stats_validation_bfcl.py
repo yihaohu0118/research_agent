@@ -16,7 +16,7 @@ track per-category metrics during training.
 
 Usage:
   python scripts/stats_validation_bfcl.py \
-      --val-dir experiments/tech_synthetic/bfcl_tocf_mvp/validation_log \
+      --val-dir experiments/tech_synthetic/bfcl_tocf_tpatch/validation_log \
       --parquet data/bfcl_test.parquet \
       --bfcl-jsonl env_service/environments/bfcl/bfcl_data/multi_turn_processed.jsonl
 """

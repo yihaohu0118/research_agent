@@ -1,0 +1,281 @@
+# C-Patch + GRPO on BFCL v3 multi-turn.
+#
+# Isolated C-Patch ablation row: a per-category query-suffix cue library is
+# the ONLY intervention on top of vanilla GRPO. No T-Patch (uniform category
+# sampling), no F-Patch dense reward (binary reward stays).
+#
+# Ablation position:
+#   - vs bfcl_grpo.yaml        : isolates the value of per-category cueing
+#                                under the native sparse reward.
+#   - vs bfcl_tocf_tpatch.yaml : isolates C-Patch from T-Patch reweighting.
+#   - vs bfcl_tocf_fpatch.yaml : isolates cue shaping from reward shaping.
+#
+# Design notes (why this C-Patch is structurally different from the legacy one):
+#   1. Per-category cue library.  The legacy C-Patch shipped a single global
+#      suffix ("Before calling a function, verify required parameters ..."),
+#      which actively misleads miss_func tasks (the issue there is "no tool
+#      fits" not "missing params") and has no purchase on long_context. The
+#      new ``by_category`` path in agentevolver/module/tocf/patch.py looks up
+#      a cue per BFCL subset. Each cue is short and targets the *behaviour*
+#      gap between what the T3RL system prompt already covers and what the
+#      category-specific failure mode needs.
+#
+#   2. Cues do NOT mention category labels.  If the suffix text said
+#      "this is a miss_func task, ...", training would hand the model a
+#      supervised classification signal that disappears at eval time --
+#      a hard train/val drift. Cues are written as behaviour rules only
+#      (e.g. "if none of the available tools fit, reply in text"), so the
+#      model learns a policy, not a label lookup.
+#
+#   3. apply_to_validation=false is hard-locked.  Eval runs under the T3RL
+#      system prompt baseline alone, so val accuracy reflects the policy
+#      rather than the cue. This is the only reliable way to read whether
+#      C-Patch's training signal actually transferred into the weights.
+#
+#   4. base category gets an empty cue (explicit control).  Not every
+#      category benefits from a cue; multi_turn_base is already the
+#      regime the T3RL system prompt handles best. An empty string here
+#      is treated as "hold out this category" and does NOT fall through
+#      to the legacy global suffix (see ``category_fallback`` behaviour
+#      of resolve_query_suffix).
+
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
+defaults:
+  - ppo_trainer
+  - agentevolver
+  - _self_
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+data:
+  train_files: data/bfcl_train_400.parquet
+  val_files: data/bfcl_test_400.parquet
+  train_batch_size: 16
+  max_prompt_length: 8192
+  max_response_length: 4096
+  return_raw_chat: true
+  filter_overlong_prompts: true
+  truncation: "error"
+  val_batch_size: 200
+  val_type: "val"
+
+# ── Algorithm: standard GRPO ──────────────────────────────────────────────────
+algorithm:
+  gamma: 1.0
+  lam: 1.0
+  adv_estimator: grpo
+  use_kl_in_reward: false
+  loss_agg_mode: "seq-mean-token-mean"
+  kl_penalty: kl
+  kl_ctrl:
+    type: fixed
+    kl_coef: 0.0
+
+# ── Actor / rollout / ref ─────────────────────────────────────────────────────
+actor_rollout_ref:
+  hybrid_engine: true
+  model:
+    path: Qwen/Qwen2.5-7B-Instruct
+    use_remove_padding: true
+    enable_gradient_checkpointing: true
+  rollout:
+    name: vllm
+    mode: async
+    temperature: 1.0
+    n: 8
+    prompt_length: ${data.max_prompt_length}
+    response_length: ${data.max_response_length}
+    max_model_len: 16384
+    gpu_memory_utilization: 0.6
+    tensor_model_parallel_size: 1
+    log_prob_micro_batch_size_per_gpu: 1
+    log_prob_max_token_len_per_gpu: 16384
+    val_kwargs:
+      n: 1
+      temperature: 0
+    multi_turn:
+      enable: true
+      format: llama3_json
+      max_steps: 20
+      completion_callback: agentevolver.module.trainer.simple_completion_callback.SimpleCompletionCallback
+      tool_config_path: ""
+    max_env_worker: 32
+    sparse: true
+  actor:
+    optim:
+      lr: 1e-6
+    use_kl_loss: true
+    kl_loss_coef: 0.001
+    kl_loss_type: low_var_kl
+    clip_ratio: 0.2
+    clip_ratio_low: 0.2
+    clip_ratio_high: 0.2
+    off_cliprange_high: 1.0
+    clip_ratio_c: 10.0
+    grad_clip: 1.0
+    entropy_coeff: 0
+    ppo_micro_batch_size_per_gpu: 1
+    ppo_mini_batch_size: 8
+    ppo_max_token_len_per_gpu: 16384
+    loss_agg_mode: token-mean
+    fsdp_config:
+      param_offload: false
+      optimizer_offload: false
+  ref:
+    log_prob_micro_batch_size_per_gpu: 1
+    log_prob_max_token_len_per_gpu: 16384
+    fsdp_config:
+      param_offload: true
+
+critic:
+  grad_clip: 1.0
+  cliprange_value: 0.5
+  ppo_max_token_len_per_gpu: 16384
+  forward_max_token_len_per_gpu: 16384
+
+# ── Environment ───────────────────────────────────────────────────────────────
+env_service:
+  env_type: "bfcl"
+  env_url: "http://127.0.0.1:8082"
+  env_feedin_preference: code
+  bfcl:
+    strict_tool_parser: true
+    enforce_available_tools: true
+    # t3rl_text ships the T3RL permissive system prompt (including the
+    # "no-tool-fits → reply in text" clause). C-Patch stacks per-task
+    # cues on top of that baseline; see header for the rationale.
+    tool_prompt_mode: t3rl_text
+    tool_result_mode: plain_user
+    eval_policy: clean
+
+# ── Trainer ───────────────────────────────────────────────────────────────────
+trainer:
+  n_gpus_per_node: 4
+  nnodes: 1
+  critic_warmup: 0
+  logger: ["console"]
+  project_name: "bfcl_tocf_cpatch"
+  experiment_name: "bfcl_cpatch_grpo_400x400"
+  save_freq: 0
+  save_best_checkpoint: false
+  keep_only_best_checkpoint: true
+  save_limit: 0
+  test_freq: 10
+  total_epochs: 10
+  val_before_train: true
+  val_only: false
+
+# ── AgentEvolver task manager ─────────────────────────────────────────────────
+task_manager:
+  n: 0
+  train_data_path: tasks_explored.train.json
+  val_data_path: tasks_explored.val.json
+  llm_client: qwen-plus
+  env_profile: cookbook/env_profiles/bfcl.json
+  bs: ${data.train_batch_size}
+  num_explore_threads: ${thread_pool.max_workers}
+  mixture:
+    use_original_tasks: true
+    synthetic_data_ratio: 0.0
+    shuffle: true
+  grader:
+    # Binary reward only: no F-Patch dense shaping. Stays on the stock
+    # ``env`` grader (same as bfcl_grpo.yaml) so the only difference
+    # against the GRPO baseline is the per-category cue library.
+    original_grader: env
+    synthetic_grader: llm-binary-gt-no_constraint
+  strategy: random
+  strategy_args:
+    max_explore_step: 30
+    max_llm_retries: 6
+    env_url: ${env_service.env_url}
+    exploration_llm_temperature: 1.0
+    exploration_llm_top_p: 1.0
+    exploration_llm_top_k: 100
+
+# ── Experience management OFF ─────────────────────────────────────────────────
+exp_manager:
+  val_rollout_mode: "woexp"
+  train_rollout_mode: "woexp"
+  rollout_ratio: 0.0
+  train_sample_mode: "alldiscard"
+  train_sample_keepratio: 1.0
+  experience_template: "\n\nSome Related Experience to help you to complete the task:<EXP>{}</EXP>\n\n"
+  init_exp_before_training: false
+  init_exp_only: false
+  summary_batch_size: 8
+  reme:
+    base_url: "http://127.0.0.1:8001"
+    workspace_id: "default"
+    enable_summarizer: false
+    enable_context_generator: false
+    retrieve_top_k: 3
+    updated_freq: 0
+
+attribution_driven_credit_assignment:
+  enable: false
+
+# ── TOCF: C-Patch only ────────────────────────────────────────────────────────
+tocf:
+  enable: true
+  stats:
+    enable: true
+    dump_dir: experiments/bfcl_tocf_cpatch/tocf_stats
+
+  # T-Patch OFF: uniform category sampling, stock BFCL mixture.
+  task_distribution:
+    enable: false
+
+  # C-Patch ON: per-category cue library, train-only.
+  query_suffix:
+    enable: true
+    apply_to_validation: false
+
+    # Policy when a task's category is missing from ``by_category``:
+    # ``empty`` = emit no cue (recommended, keeps the ablation clean);
+    # ``suffix`` = fall back to the legacy global ``suffix`` string.
+    category_fallback: empty
+    suffix: ""
+
+    # Behaviour-level cues. Each cue targets the gap between what the
+    # T3RL system prompt already covers ("you may reply in text when
+    # no tool fits / when params are missing") and the per-category
+    # failure mode's preferred action. Crucially, NO cue mentions the
+    # category name itself -- that would leak a train-time label the
+    # eval side cannot see.
+    by_category:
+      # Base: no cue. The T3RL system prompt handles vanilla multi_turn
+      # well; an empty string here is treated as an explicit hold-out
+      # (does NOT fall back to the global suffix).
+      multi_turn_base: ""
+
+      # miss_func: the correct behaviour is to refuse rather than pick
+      # the nearest-looking tool. The T3RL system prompt allows this
+      # but does not forbid the failure mode; we forbid it explicitly.
+      multi_turn_miss_func: >-
+        If none of the available tools can fulfil this request, reply in
+        natural language explaining what you cannot do. Do not pick the
+        nearest-looking tool as a workaround.
+
+      # miss_param: the T3RL system prompt says "you may reply in text
+      # when params are missing". The cue converts that permission into
+      # a concrete action: ask the user.
+      multi_turn_miss_param: >-
+        If a required argument is not supplied by the user, ask a
+        clarifying question instead of guessing a value.
+
+      # long_context: the T3RL system prompt says nothing about turn
+      # scoping. This cue teaches the model to treat earlier turns as
+      # state not as pending requests, which is the specific failure
+      # mode this subset stresses.
+      multi_turn_long_context: >-
+        Reply to the user's most recent request only. Earlier turns are
+        shown for state, not as pending requests.
+
+  # F-Patch OFF: reward stays binary (0/1) as in bfcl_grpo.yaml.
+  feedback:
+    dense_reward:
+      enable: false

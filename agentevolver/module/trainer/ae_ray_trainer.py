@@ -68,31 +68,10 @@ from agentevolver.utils.tracking import ValidationGenerationsLogger
 from agentevolver.module.adv_processor.adca_grpo_pipeline import apply_adca_grpo
 
 from agentevolver.module.exp_manager.exp_manager import ExperienceManager
-from agentevolver.module.pace.advantage_weighting import (
-    apply_curriculum_advantage_weighting,
-    pace_advantage_weighting_enabled,
-)
+from agentevolver.module.tocf import apply_apatch_advantage_weighting, apatch_enabled
 from agentevolver.module.tocf.controller import TOCFController
 from agentevolver.module.tocf.stats import TOCFStats
 from agentevolver.module.tocf.category import infer_task_category
-from agentevolver.module.tocf.demo_patch import (
-    DemoConfig,
-    DemoInjector,
-    DemoPool,
-    demo_patch_enabled,
-)
-from agentevolver.module.gcce import (
-    GCCERouter,
-    GapAttributor,
-    HindsightAttributionRouter,
-    OracleProbe,
-    TeacherCache,
-    apply_gcce_advantage_weighting,
-    gcce_advantage_weighting_enabled,
-    gcce_enabled,
-    hindsight_enabled,
-)
-from agentevolver.module.seal_ext import CapGapExplorer, cap_gap_explore_enabled
 
 
 def _deserialize_metadata(raw):
@@ -439,95 +418,10 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
         tocf_cfg = config.get("tocf", {})
         tocf_enabled = bool(tocf_cfg.get("enable", False)) if tocf_cfg else False
         stats_cfg = tocf_cfg.get("stats", {}) if tocf_cfg else {}
-        pace_cfg = config.get("pace", {})
-        pace_stats_cfg = pace_cfg.get("stats", {}) if pace_cfg else {}
-        pace_adv_weighting_enabled = pace_advantage_weighting_enabled(config)
-        stats_enabled = (tocf_enabled and stats_cfg.get("enable", True)) or pace_adv_weighting_enabled
-        stats_dump_dir = stats_cfg.get("dump_dir", None) or pace_stats_cfg.get("dump_dir", None)
-        # Ensure TOCFStats exists whenever GCCE is on, since CGA consumes it.
-        stats_enabled = stats_enabled or gcce_enabled(config)
+        stats_enabled = tocf_enabled and stats_cfg.get("enable", True)
+        stats_dump_dir = stats_cfg.get("dump_dir", None)
         self.tocf_stats = TOCFStats(dump_dir=stats_dump_dir) if stats_enabled else None
         self.tocf_controller = TOCFController(tocf_cfg) if tocf_enabled else None
-
-        # ── GCCE: counterfactual gap attribution + gap-conditioned routing ──────
-        if gcce_enabled(config):
-            self.gcce_teacher_cache = TeacherCache.from_config(config)
-            self.gcce_oracle_probe = OracleProbe(config)
-            # Hindsight attributor is created lazily in fit() when
-            # async_rollout_manager is available. We pass the *slot* to
-            # GapAttributor so it can pick up the signal once wired.
-            self.gcce_hindsight_router: HindsightAttributionRouter | None = None
-            self.gcce_attributor = GapAttributor(
-                config=config,
-                teacher_cache=self.gcce_teacher_cache,
-                oracle_probe=self.gcce_oracle_probe,
-                hindsight_router=None,  # late-bound in fit()
-            )
-            self.gcce_router = GCCERouter(config=config)
-            logger.info("[GCCE] Enabled: CGA + router active. TOCF/PACE degrade to GCCE sub-components.")
-        else:
-            self.gcce_teacher_cache = None
-            self.gcce_oracle_probe = None
-            self.gcce_attributor = None
-            self.gcce_router = None
-            self.gcce_hindsight_router = None
-
-        # ──────────── D-Patch (CoEvo-D demonstration injection) ────────────
-        # D-Patch is the environment-side counterpart of GCCE's policy-side
-        # advantage reweighting. It consumes the router's ``demo_rate(c)``
-        # and injects ground-truth rollouts into failing groups so GRPO
-        # always has a positive anchor. The injector is paired with the
-        # advantage-amplification hook in ``apply_gcce_advantage_weighting``
-        # (both driven by the *same* CGA router -> the paper's co-evolution
-        # coupling).
-        self.demo_injector: DemoInjector | None = None
-        self.demo_config: DemoConfig | None = None
-        if demo_patch_enabled(config):
-            try:
-                demo_cfg = DemoConfig.from_config(config)
-                pool = DemoPool(demo_cfg.pool_path).load()
-                if len(pool) > 0:
-                    self.demo_injector = DemoInjector(
-                        config=demo_cfg,
-                        pool=pool,
-                        tokenizer=self.tokenizer,
-                        max_prompt_length=int(self.config.data.max_prompt_length),
-                        max_response_length=int(self.config.data.max_response_length),
-                    )
-                    self.demo_config = demo_cfg
-                    logger.info(
-                        f"[D-Patch] Enabled: pool_size={len(pool)}, "
-                        f"uniform_rate={demo_cfg.uniform_rate}, "
-                        f"alpha_demo={demo_cfg.alpha_demo}, "
-                        f"router_gated={self.gcce_router is not None}."
-                    )
-                else:
-                    logger.warning(
-                        "[D-Patch] Configured but demo pool is empty -> "
-                        "running as no-op. Did you forget to run "
-                        "scripts/build_bfcl_demo_pool.py?"
-                    )
-            except Exception as exc:
-                logger.warning(
-                    f"[D-Patch] Initialisation failed ({exc}); continuing without D-Patch."
-                )
-
-        # ──────────── SEAL cap-gap exploration (optional) ──────────────
-        # Independent of GCCE enablement. When enabled without hindsight,
-        # it becomes a no-op because no capability gaps are ever pushed.
-        self.seal_cap_gap_explorer: CapGapExplorer | None = None
-        if cap_gap_explore_enabled(config):
-            seal_cfg = _cfg_lookup(config, "seal", {}) or {}
-            cap_cfg = seal_cfg.get("cap_gap_explore", {}) if isinstance(seal_cfg, dict) else getattr(seal_cfg, "cap_gap_explore", {})
-            # Coerce OmegaConf nodes -> dict for the explorer constructor.
-            if not isinstance(cap_cfg, dict):
-                try:
-                    from omegaconf import OmegaConf
-                    cap_cfg = OmegaConf.to_container(cap_cfg, resolve=True)
-                except Exception:
-                    cap_cfg = {}
-            self.seal_cap_gap_explorer = CapGapExplorer(cap_cfg or {})
-            logger.info("[SEAL] CapGapExplorer enabled.")
 
         self._create_dataloader_from_manager(collate_fn, shuffle_trainset)  # ⭐ Create dataloader from the provided manager
 
@@ -755,161 +649,6 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
         except Exception as e:
             print(f"Warning: Could not set total_training_steps in config. Structure missing? Error: {e}")
 
-
-    # ─────────────────────── SEAL / hindsight helpers ───────────────────────
-
-    def _ensure_hindsight_router(self) -> None:
-        """Lazy-instantiate the on-policy hindsight router once rollout is up.
-
-        The router needs ``llm_chat_fn`` served by ``async_rollout_manager``,
-        which only exists after ``init_workers`` completes. We therefore
-        create it on first use inside ``fit()`` and reuse it thereafter.
-        """
-        if self.gcce_hindsight_router is not None:
-            return
-        if not hindsight_enabled(self.config):
-            return
-        try:
-            hs_cfg_raw = _cfg_lookup(_cfg_lookup(self.config, "gcce", {}), "hindsight", {}) or {}
-            if not isinstance(hs_cfg_raw, dict):
-                try:
-                    from omegaconf import OmegaConf
-                    hs_cfg = OmegaConf.to_container(hs_cfg_raw, resolve=True) or {}
-                except Exception:
-                    hs_cfg = {}
-            else:
-                hs_cfg = hs_cfg_raw
-            from agentevolver.module.gcce.hindsight_attributor import (
-                DEFAULT_REFLECTION_PROMPT,
-            )
-
-            sampling = hs_cfg.get("sampling_params", {
-                "temperature": 0.0,
-                "max_tokens": 256,
-            })
-            llm_chat_fn = self.env_manager.get_llm_chat_fn(sampling)
-            self.gcce_hindsight_router = HindsightAttributionRouter(
-                llm_chat_fn=llm_chat_fn,
-                env_client=None,
-                reflection_prompt=hs_cfg.get(
-                    "reflection_prompt", DEFAULT_REFLECTION_PROMPT
-                ),
-                env_block_token=hs_cfg.get("env_block_token", "[ENV_BLOCK]"),
-                verify_correction=bool(hs_cfg.get("verify_correction", False)),
-                failure_threshold=float(hs_cfg.get("failure_threshold", 1.0)),
-                max_attributions_per_step=int(
-                    hs_cfg.get("max_attributions_per_step", 64)
-                ),
-            )
-            # Bind router into the attributor so end-of-epoch CGA picks it up.
-            if self.gcce_attributor is not None:
-                self.gcce_attributor.hindsight_router = self.gcce_hindsight_router
-            logger.info("[GCCE] HindsightAttributionRouter initialised on-policy.")
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning(
-                f"[GCCE] Failed to initialise hindsight router: {exc}"
-            )
-            self.gcce_hindsight_router = None
-
-    def _run_hindsight_attribution(
-        self,
-        tasks: list,
-        trajectories: list,
-        epoch: int,
-        step_idx: int,
-    ) -> dict:
-        """Run hindsight attribution on failed trajectories.
-
-        Populates per-category counters on the router and (when enabled)
-        pushes capability-gap seeds into the SEAL explorer buffer. Returns
-        a flat metrics dict ready for the trainer logger.
-        """
-        if self.gcce_hindsight_router is None or not trajectories:
-            return {}
-        if len(tasks) != len(trajectories):
-            logger.warning(
-                f"[Hindsight] tasks/trajectories size mismatch "
-                f"({len(tasks)} vs {len(trajectories)}), skipping."
-            )
-            return {}
-
-        items = []
-        for task, traj in zip(tasks, trajectories):
-            score = float(
-                getattr(getattr(traj, "reward", None), "outcome", 0.0) or 0.0
-            )
-            category = infer_task_category(
-                task.task_id, task.env_type, task.metadata
-            )
-            # steps is already role/content dict list — the exact format the
-            # llm_chat_fn expects, modulo final-prompt injection in router.
-            messages = list(getattr(traj, "steps", []) or [])
-            items.append(
-                {
-                    "score": score,
-                    "category": category,
-                    "messages": messages,
-                    "task_id": task.task_id,
-                    "instance_id": (task.metadata or {}).get("instance_id", ""),
-                    "first_query": task.query or "",
-                    "task": task,
-                }
-            )
-        items_by_task_id = {str(item["task_id"]): item for item in items}
-
-        try:
-            results = self.gcce_hindsight_router.batch_attribute(items)
-        except Exception as exc:
-            logger.warning(f"[Hindsight] batch_attribute failed: {exc}")
-            return {}
-
-        # Push capability-gap seeds into the SEAL cap_gap explorer.
-        if self.seal_cap_gap_explorer is not None:
-            from agentevolver.module.gcce.hindsight_attributor import GapType as _GT
-
-            for res in results:
-                if res.gap_type != _GT.CAPABILITY_GAP:
-                    continue
-                task_id = str(res.metadata.get("task_id", ""))
-                it = items_by_task_id.get(task_id)
-                if it is None:
-                    continue
-                self.seal_cap_gap_explorer.push(
-                    task_id=it["task_id"],
-                    first_query=it["first_query"],
-                    messages=it["messages"],
-                    corrected_action=res.corrected_action,
-                    category=it["category"],
-                    metadata={"original_instance_id": it["instance_id"]},
-                )
-
-        # Surface batch metrics (per-step) and window metrics (cumulative).
-        from agentevolver.module.gcce.hindsight_attributor import (
-            compute_attribution_metrics,
-        )
-
-        m = compute_attribution_metrics(results)
-        m.update(self.gcce_hindsight_router.metrics())
-        if self.seal_cap_gap_explorer is not None:
-            m.update(self.seal_cap_gap_explorer.metrics())
-        m["gcce/hindsight/step"] = float(step_idx)
-        m["gcce/hindsight/epoch"] = float(epoch)
-        return m
-
-    def _maybe_build_cap_gap_tasks(self, base_env_type: str) -> list:
-        """Build cap-gap exploration tasks if scheduler says so."""
-        if self.seal_cap_gap_explorer is None:
-            return []
-        if not self.seal_cap_gap_explorer.should_explore(self.global_steps):
-            return []
-        seeds = self.seal_cap_gap_explorer.sample_seeds()
-        if not seeds:
-            return []
-        return self.seal_cap_gap_explorer.build_exploration_tasks(
-            seeds=seeds, env_type=base_env_type
-        )
-
-    # ─────────────────────── end SEAL / hindsight helpers ───────────────────
 
     def _get_attribution_config(self):
         """
@@ -1615,71 +1354,6 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                                 self.tocf_stats.observe(tasks, trajectories, epoch, self.global_steps)
                                 metrics.update(self.tocf_stats.metrics())
 
-                            # ──────────── SEAL: on-policy hindsight attribution ────────────
-                            # Lazily create the router the first time rollout is live
-                            # (it needs env_manager.get_llm_chat_fn), then attribute
-                            # failures -> {capability, environment} gaps. Populates the
-                            # cap-gap buffer and feeds per-category (cap_rate, env_rate)
-                            # into GapAttributor when attribution.source=="hindsight".
-                            if hindsight_enabled(self.config):
-                                self._ensure_hindsight_router()
-                                hs_metrics = self._run_hindsight_attribution(
-                                    tasks=tasks,
-                                    trajectories=trajectories,
-                                    epoch=epoch,
-                                    step_idx=self.global_steps,
-                                )
-                                if hs_metrics:
-                                    metrics.update(hs_metrics)
-                            # ──────────── end SEAL hindsight ──────────────────────────────
-
-                            # ──────────── D-Patch: CoEvo-D demo injection ────────────
-                            # Append ground-truth demonstration rollouts to
-                            # ``trajectories`` according to the CGA-gated
-                            # per-category rate from the router. The injected
-                            # demos have reward=1 and participate in GRPO's
-                            # group-wise advantage normalisation as winners,
-                            # while their advantage is further amplified by
-                            # ``router.demo_advantage_scale(c)`` downstream
-                            # (see apply_gcce_advantage_weighting).
-                            if self.demo_injector is not None and self.demo_injector.enabled:
-                                rollout_n = int(
-                                    _cfg_lookup(
-                                        _cfg_lookup(self.config.actor_rollout_ref, "rollout", {}),
-                                        "n",
-                                        1,
-                                    )
-                                )
-                                def _dpatch_cat_getter(task):
-                                    md = getattr(task, "metadata", {}) or {}
-                                    if isinstance(md, dict):
-                                        cat = md.get("category") or md.get("dataset_type")
-                                        if cat:
-                                            return cat
-                                    return infer_task_category(
-                                        getattr(task, "task_id", ""),
-                                        self.config.env_service.env_type,
-                                        md if isinstance(md, dict) else {},
-                                    )
-                                tasks, trajectories, dpatch_report = self.demo_injector.inject(
-                                    tasks=tasks,
-                                    trajectories=trajectories,
-                                    router=self.gcce_router,
-                                    rollout_n=rollout_n,
-                                    epoch=epoch,
-                                    category_getter=_dpatch_cat_getter,
-                                )
-                                metrics.update(self.demo_injector.metrics(dpatch_report))
-                                # NOTE: demos reuse existing task_ids so
-                                # (a) union_gen_batch_via_task_id routes
-                                # them correctly without touching ``tasks``,
-                                # and (b) we intentionally do NOT feed them
-                                # into ``tocf_stats`` -- CGA must see only
-                                # on-policy rollouts, otherwise Delta_pi
-                                # would be biased toward zero by the gold
-                                # demos we just injected.
-                            # ──────────── end D-Patch ──────────────────────────────
-
                             gen_batch_output = self.env_manager.to_dataproto(trajectories)
                             
                             # update metrics about experience manager
@@ -1853,30 +1527,15 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                             )
                             metrics.update(adca_metrics)
                         # ==================== End ADCA GRPO ====================
-                        # ==================== GCCE advantage weighting ====================
-                        # GCCE supersedes PACE when enabled: it multiplies positive
-                        # advantages by 1 + alpha_policy * r_pi(c), where r_pi is the
-                        # causal share of each category's regret attributed to the
-                        # policy (vs. the environment). If GCCE is off, PACE runs
-                        # as before. They are mutually exclusive by design.
-                        gcce_is_on = gcce_advantage_weighting_enabled(self.config)
-                        if gcce_is_on:
-                            batch, gcce_adv_metrics = apply_gcce_advantage_weighting(
+                        # ==================== A-Patch: tag-aware advantage weighting ====================
+                        if apatch_enabled(self.config):
+                            batch, apatch_metrics = apply_apatch_advantage_weighting(
                                 batch=batch,
-                                router=self.gcce_router,
                                 config=self.config,
                                 env_type=self.config.env_service.env_type,
                             )
-                            metrics.update(gcce_adv_metrics)
-                        else:
-                            batch, pace_metrics = apply_curriculum_advantage_weighting(
-                                batch=batch,
-                                stats=self.tocf_stats,
-                                config=self.config,
-                                env_type=self.config.env_service.env_type,
-                            )
-                            metrics.update(pace_metrics)
-                        # ==================== End GCCE advantage weighting ================
+                            metrics.update(apatch_metrics)
+                        # ==================== End A-Patch ====================
                         # Apply decay factor of 0.5 to non_tensor_batch['extras'][i]['evaluator'] != 'env'
                         if os.environ.get("DEBUG_ARG","").find("synth_decay")!=-1:
                             if epoch==0 and i==0:
@@ -1994,59 +1653,11 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
             if self.tocf_stats is not None:
                 self.tocf_stats.dump(f"epoch_{epoch}.json")
 
-                # ──────────── GCCE end-of-epoch attribution + routing ────────────
-                if self.gcce_router is not None:
-                    # 1) run oracle-env probe every K epochs (off by default)
-                    if self.gcce_oracle_probe is not None and self.gcce_oracle_probe.should_probe(epoch):
-                        try:
-                            self.gcce_oracle_probe.run_probe(epoch, self.global_steps)
-                        except Exception as exc:
-                            logger.warning(f"[GCCE] Oracle probe failed: {exc}")
-
-                    # 2) attribute (Delta_E, Delta_pi) per category
-                    try:
-                        tasks_for_cga = list(getattr(self.train_dataset, "_tasks", []) or [])
-                        gaps = self.gcce_attributor.attribute(
-                            tocf_stats=self.tocf_stats,
-                            tasks=tasks_for_cga,
-                            env_type=self.config.env_service.env_type,
-                        )
-                    except Exception as exc:
-                        logger.warning(f"[GCCE] Gap attribution failed: {exc}")
-                        gaps = {}
-
-                    # 3) route gaps -> (r_E, r_pi, patch_budget, env_weights)
-                    if gaps:
-                        decision = self.gcce_router.route(gaps)
-                        env_weights = decision.env_category_weights
-                        if env_weights and hasattr(self.train_dataset, "set_tocf_category_weights"):
-                            self.train_dataset.set_tocf_category_weights(env_weights)
-                        # merge attributor + router metrics
-                        metrics.update(self.gcce_attributor.metrics())
-                        metrics.update(self.gcce_router.metrics())
-                        if self.gcce_oracle_probe is not None:
-                            metrics.update(self.gcce_oracle_probe.metrics())
-                        if self.gcce_teacher_cache is not None:
-                            metrics.update(self.gcce_teacher_cache.metrics())
-                        if self.gcce_hindsight_router is not None:
-                            metrics.update(self.gcce_hindsight_router.metrics())
-                        if self.seal_cap_gap_explorer is not None:
-                            metrics.update(self.seal_cap_gap_explorer.metrics())
-                        logger.log(data=metrics, step=self.global_steps)
-                    # If GCCE is ON we short-circuit the naive TOCF failure-rate
-                    # controller: env-side updates flow through the router.
-                elif self.tocf_controller is not None:
+                if self.tocf_controller is not None:
                     decision = self.tocf_controller.accept(self.tocf_controller.propose(self.tocf_stats))
                     if decision is not None and decision.accepted:
                         self.train_dataset.apply_tocf_patches(decision)
                     logger.log(data=self.tocf_controller.metrics(), step=self.global_steps)
-                # ──────────── end GCCE end-of-epoch ──────────────────────────────
-
-                # Reset the hindsight per-window counts so each epoch's CGA is
-                # computed over fresh attributions. The cap_gap explorer
-                # buffer is *not* reset (it's a rolling deque by design).
-                if self.gcce_hindsight_router is not None:
-                    self.gcce_hindsight_router.reset_window()
 
                 self.tocf_stats.reset_window()
             self.train_dataset.update()  # ⭐ Update the training dataset for the next iteration

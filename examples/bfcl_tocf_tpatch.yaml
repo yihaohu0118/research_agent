@@ -2,14 +2,13 @@
 #
 # This is the isolated T-Patch ablation row: category-weighted task sampling
 # is the ONLY intervention on top of vanilla GRPO. Reward stays binary
-# (0/1 task success); no F-Patch dense reward, no PACE/GCCE advantage
-# weighting, no hindsight attribution, no SEAL cap-gap exploration.
+# (0/1 task success); no F-Patch dense reward.
 #
 # Ablation position:
-#   - vs bfcl_grpo.yaml      : isolates the value of category reweighting
-#                              under the native sparse reward.
-#   - vs bfcl_tocf_mvp.yaml  : isolates how much of the TOCF gain comes
-#                              from T-Patch alone vs. F-Patch dense reward.
+#   - vs bfcl_grpo.yaml        : isolates the value of category reweighting
+#                                under the native sparse reward.
+#   - vs bfcl_tocf_fpatch.yaml : isolates T-Patch reweighting from F-Patch
+#                                dense reward shaping.
 #
 # Design notes (why this differs from the other TOCF rows):
 #   1. objective=learning_progress.  Under sparse 0/1 reward the legacy
@@ -269,24 +268,3 @@ tocf:
       partial_credit_weight: 1.0
       cap_decay: false
       min_cap: 0.1
-
-# ── Everything else OFF ───────────────────────────────────────────────────────
-pace:
-  enable: false
-  advantage_weighting:
-    enable: false
-
-gcce:
-  enable: false
-  teacher:
-    enable: false
-  oracle_env:
-    enable: false
-  hindsight:
-    enable: false
-  advantage_weighting:
-    enable: false
-
-seal:
-  cap_gap_explore:
-    enable: false

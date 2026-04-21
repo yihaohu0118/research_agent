@@ -13,7 +13,7 @@ set -euo pipefail
 
 REMOTE_URL="${REMOTE_URL:-https://github.com/yihaohu0118/research_agent.git}"
 BRANCH="${BRANCH:-main}"
-COMMIT_MSG=${COMMIT_MSG:-"Initial commit: AgentEvolver + TOCF + PACE + GCCE (400/400 BFCL split)"}
+COMMIT_MSG=${COMMIT_MSG:-"Initial commit: AgentEvolver + TOCF (400/400 BFCL split)"}
 
 cd "$(dirname "$0")/.."
 

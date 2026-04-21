@@ -402,28 +402,17 @@ APPWORLD_EXPERIMENTS=(
 # BFCL ablation ladder (same 400-train / 400-test split for all rows; same
 # universal hyperparameters lr=1e-6, entropy_coeff=0, total_epochs=10,
 # temperature=1.0, strict_tool_parser=true across every row):
-#   bfcl_grpo             — pure GRPO, no TOCF/PACE/GCCE patches
-#   bfcl_tocf_mvp         — TOCF (T-Patch category reweighting + F-Patch
-#                           outcome-aligned EnvTuning-style dense reward)
-#   bfcl_tocf_pace        — TOCF + PACE (alpha=0.5, max_weight=2.0 failure-
-#                           rate advantage weighting)
-#   bfcl_gcce             — TOCF + GCCE with HEURISTIC CGA
-#                           (Delta_E from F-Patch reward mean, Delta_pi from
-#                           failure-rate residual; no teacher, no oracle)
-#   bfcl_gcce_hindsight   — TOCF + GCCE with ON-POLICY hindsight attribution
-#                           (SEAL §3.4.1). Only addition vs. bfcl_gcce is the
-#                           reflection-based (cap_gap_rate, env_gap_rate).
-#   bfcl_gcce_full        — bfcl_gcce_hindsight + SEAL cap-gap explorer
-#                           buffer & metrics (Stage 1). Use this row to
-#                           measure how much identifiable attribution +
-#                           cap-gap signal contribute on top of GCCE.
+#   bfcl_grpo        — pure GRPO, no TOCF patches
+#   bfcl_tocf_tpatch — isolated T-Patch (per-category task sampling) ablation
+#   bfcl_tocf_fpatch — isolated F-Patch (T3RL-style dense reward) ablation
+#   bfcl_tocf_cpatch — isolated C-Patch (per-category cue library) ablation
+#   bfcl_tocf_apatch — isolated A-Patch (tag-aware advantage weighting) ablation
 BFCL_EXPERIMENTS=(
   "bfcl_grpo|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
-  "bfcl_tocf_mvp|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
-  "bfcl_tocf_pace|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
-  "bfcl_gcce|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
-  "bfcl_gcce_hindsight|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
-  "bfcl_gcce_full|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
+  "bfcl_tocf_tpatch|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
+  "bfcl_tocf_fpatch|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
+  "bfcl_tocf_cpatch|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
+  "bfcl_tocf_apatch|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
 )
 
 SELECTED_EXPERIMENTS=()
