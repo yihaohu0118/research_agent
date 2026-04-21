@@ -82,6 +82,33 @@ def _metadata_from_batch(batch: Any, idx: int) -> dict:
     return metadata
 
 
+def _is_demo_row(batch: Any, idx: int) -> bool:
+    """Detect whether this row was injected by D-Patch.
+
+    Three redundant channels are checked because the flag flows through
+    different containers depending on whether it was set at trajectory
+    construction time (``metadata.is_demo``) or stamped onto the reward
+    scores dict by ``env_manager.trajectories_to_samples``:
+
+      1. ``non_tensor_batch["extras"][idx]["is_demo"]``
+      2. ``non_tensor_batch["reward_scores"][idx]["metadata"]["is_demo"]``
+      3. ``non_tensor_batch["rollout_ids"][idx]`` starting with ``demo::``
+    """
+    try:
+        extras = _as_dict(_array_get(batch.non_tensor_batch.get("extras"), idx, {}))
+        if bool(extras.get("is_demo", False)):
+            return True
+        reward_meta = _as_dict(_reward_item(batch, idx).get("metadata", {}))
+        if bool(reward_meta.get("is_demo", False)):
+            return True
+        rid = _array_get(batch.non_tensor_batch.get("rollout_ids"), idx, "")
+        if isinstance(rid, str) and rid.startswith("demo::"):
+            return True
+    except Exception:
+        return False
+    return False
+
+
 def _task_id_from_batch(batch: Any, idx: int) -> str:
     task_id = _array_get(batch.non_tensor_batch.get("task_ids"), idx, None)
     if task_id:
@@ -153,18 +180,50 @@ def apply_gcce_advantage_weighting(batch: Any, router: Any, config: Any, env_typ
     weights = torch.ones(advantages.shape[0], device=advantages.device, dtype=advantages.dtype)
     sample_adv_scores = _sample_advantage_score(batch)
 
-    by_category: dict[str, dict[str, float]] = defaultdict(lambda: {"count": 0, "weighted": 0, "weight_sum": 0.0})
+    # Demo amplification is orthogonal to PACE-style reweighting: it only
+    # acts on rows the D-Patch injector flagged as demonstrations, and it
+    # pushes positive advantages on those rows harder so the policy
+    # actually moves toward the gold trajectory. When D-Patch is disabled
+    # there will simply be no demo rows and this code path is a no-op.
+    demo_amplify_enabled = bool(_cfg_get(adv_cfg, "demo_amplify_enable", True))
+
+    by_category: dict[str, dict[str, float]] = defaultdict(
+        lambda: {
+            "count": 0,
+            "weighted": 0,
+            "weight_sum": 0.0,
+            "demo_count": 0,
+            "demo_weighted": 0,
+            "demo_weight_sum": 0.0,
+        }
+    )
     for idx in range(advantages.shape[0]):
         task_id = _task_id_from_batch(batch, idx)
         metadata = _metadata_from_batch(batch, idx)
         category = infer_task_category(task_id, env_type, metadata)
 
-        weight = float(router.advantage_weight(category))
+        is_demo = _is_demo_row(batch, idx)
         by_category[category]["count"] += 1
-        by_category[category]["weight_sum"] += weight
-        if weight > 1.0 and _should_apply(batch, idx, sample_adv_scores, adv_cfg):
-            weights[idx] = weight
-            by_category[category]["weighted"] += 1
+        if is_demo:
+            by_category[category]["demo_count"] += 1
+
+        weight = 1.0
+        if is_demo and demo_amplify_enabled and hasattr(router, "demo_advantage_scale"):
+            # Use the paired CGA signal: the same router that drives
+            # demo_rate(c) on the env side drives demo_advantage_scale(c)
+            # on the policy side. This is the "co-" in co-evolution.
+            weight = float(router.demo_advantage_scale(category))
+            by_category[category]["demo_weight_sum"] += weight
+            if weight > 1.0 and _should_apply(batch, idx, sample_adv_scores, adv_cfg):
+                weights[idx] = weight
+                by_category[category]["demo_weighted"] += 1
+            by_category[category]["weight_sum"] += weight
+        else:
+            weight = float(router.advantage_weight(category))
+            by_category[category]["weight_sum"] += weight
+            if weight > 1.0 and _should_apply(batch, idx, sample_adv_scores, adv_cfg):
+                weights[idx] = weight
+                by_category[category]["weighted"] += 1
 
     batch.batch["advantages"] = advantages * weights.view(-1, 1)
 
@@ -183,5 +242,11 @@ def apply_gcce_advantage_weighting(batch: Any, router: Any, config: Any, env_typ
         metrics[f"{prefix}/{safe_category}/weighted_count"] = float(item["weighted"])
         metrics[f"{prefix}/{safe_category}/avg_candidate_weight"] = float(item["weight_sum"] / count)
         metrics[f"{prefix}/{safe_category}/r_policy"] = float(router.r_policy(category))
+        metrics[f"{prefix}/{safe_category}/demo_count"] = float(item["demo_count"])
+        metrics[f"{prefix}/{safe_category}/demo_weighted_count"] = float(item["demo_weighted"])
+        if item["demo_count"] > 0:
+            metrics[f"{prefix}/{safe_category}/demo_avg_weight"] = float(
+                item["demo_weight_sum"] / max(1, int(item["demo_count"]))
+            )
 
     return batch, metrics

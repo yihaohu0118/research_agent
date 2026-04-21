@@ -75,6 +75,12 @@ from agentevolver.module.pace.advantage_weighting import (
 from agentevolver.module.tocf.controller import TOCFController
 from agentevolver.module.tocf.stats import TOCFStats
 from agentevolver.module.tocf.category import infer_task_category
+from agentevolver.module.tocf.demo_patch import (
+    DemoConfig,
+    DemoInjector,
+    DemoPool,
+    demo_patch_enabled,
+)
 from agentevolver.module.gcce import (
     GCCERouter,
     GapAttributor,
@@ -465,6 +471,46 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
             self.gcce_attributor = None
             self.gcce_router = None
             self.gcce_hindsight_router = None
+
+        # ──────────── D-Patch (CoEvo-D demonstration injection) ────────────
+        # D-Patch is the environment-side counterpart of GCCE's policy-side
+        # advantage reweighting. It consumes the router's ``demo_rate(c)``
+        # and injects ground-truth rollouts into failing groups so GRPO
+        # always has a positive anchor. The injector is paired with the
+        # advantage-amplification hook in ``apply_gcce_advantage_weighting``
+        # (both driven by the *same* CGA router -> the paper's co-evolution
+        # coupling).
+        self.demo_injector: DemoInjector | None = None
+        self.demo_config: DemoConfig | None = None
+        if demo_patch_enabled(config):
+            try:
+                demo_cfg = DemoConfig.from_config(config)
+                pool = DemoPool(demo_cfg.pool_path).load()
+                if len(pool) > 0:
+                    self.demo_injector = DemoInjector(
+                        config=demo_cfg,
+                        pool=pool,
+                        tokenizer=self.tokenizer,
+                        max_prompt_length=int(self.config.data.max_prompt_length),
+                        max_response_length=int(self.config.data.max_response_length),
+                    )
+                    self.demo_config = demo_cfg
+                    logger.info(
+                        f"[D-Patch] Enabled: pool_size={len(pool)}, "
+                        f"uniform_rate={demo_cfg.uniform_rate}, "
+                        f"alpha_demo={demo_cfg.alpha_demo}, "
+                        f"router_gated={self.gcce_router is not None}."
+                    )
+                else:
+                    logger.warning(
+                        "[D-Patch] Configured but demo pool is empty -> "
+                        "running as no-op. Did you forget to run "
+                        "scripts/build_bfcl_demo_pool.py?"
+                    )
+            except Exception as exc:
+                logger.warning(
+                    f"[D-Patch] Initialisation failed ({exc}); continuing without D-Patch."
+                )
 
         # ──────────── SEAL cap-gap exploration (optional) ──────────────
         # Independent of GCCE enablement. When enabled without hindsight,
@@ -1586,6 +1632,54 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                                 if hs_metrics:
                                     metrics.update(hs_metrics)
                             # ──────────── end SEAL hindsight ──────────────────────────────
+
+                            # ──────────── D-Patch: CoEvo-D demo injection ────────────
+                            # Append ground-truth demonstration rollouts to
+                            # ``trajectories`` according to the CGA-gated
+                            # per-category rate from the router. The injected
+                            # demos have reward=1 and participate in GRPO's
+                            # group-wise advantage normalisation as winners,
+                            # while their advantage is further amplified by
+                            # ``router.demo_advantage_scale(c)`` downstream
+                            # (see apply_gcce_advantage_weighting).
+                            if self.demo_injector is not None and self.demo_injector.enabled:
+                                rollout_n = int(
+                                    _cfg_lookup(
+                                        _cfg_lookup(self.config.actor_rollout_ref, "rollout", {}),
+                                        "n",
+                                        1,
+                                    )
+                                )
+                                def _dpatch_cat_getter(task):
+                                    md = getattr(task, "metadata", {}) or {}
+                                    if isinstance(md, dict):
+                                        cat = md.get("category") or md.get("dataset_type")
+                                        if cat:
+                                            return cat
+                                    return infer_task_category(
+                                        getattr(task, "task_id", ""),
+                                        self.config.env_service.env_type,
+                                        md if isinstance(md, dict) else {},
+                                    )
+                                tasks, trajectories, dpatch_report = self.demo_injector.inject(
+                                    tasks=tasks,
+                                    trajectories=trajectories,
+                                    router=self.gcce_router,
+                                    rollout_n=rollout_n,
+                                    epoch=epoch,
+                                    category_getter=_dpatch_cat_getter,
+                                )
+                                metrics.update(self.demo_injector.metrics(dpatch_report))
+                                # NOTE: demos reuse existing task_ids so
+                                # (a) union_gen_batch_via_task_id routes
+                                # them correctly without touching ``tasks``,
+                                # and (b) we intentionally do NOT feed them
+                                # into ``tocf_stats`` -- CGA must see only
+                                # on-policy rollouts, otherwise Delta_pi
+                                # would be biased toward zero by the gold
+                                # demos we just injected.
+                            # ──────────── end D-Patch ──────────────────────────────
+
                             gen_batch_output = self.env_manager.to_dataproto(trajectories)
                             
                             # update metrics about experience manager

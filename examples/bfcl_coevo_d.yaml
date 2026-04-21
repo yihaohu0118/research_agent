@@ -1,0 +1,344 @@
+# CoEvo-D: Demonstration-gated Co-Evolution on BFCL v3.
+#
+# This is the "full CoEvo-D" row -- the headline number for the paper.
+# It extends bfcl_gcce_hindsight.yaml with **D-Patch** (environment-side
+# ground-truth demo injection) and **demo-advantage amplification**
+# (policy-side). Both sides are driven by the *same* CGA router signal:
+#
+#   Env side  : demo_rate(c)           = clip(ρ₀ + α_ρ · r_E(c))
+#   Policy side: demo_advantage_scale(c) = clip(1 + α_α · r_π(c))
+#
+# This is the "co-" in co-evolution: one attribution estimator fans out
+# into two structurally different updates. The two signals share a
+# single source (the (Δ_E, Δ_π) decomposition) so improving attribution
+# improves *both* sides simultaneously -- not the EM-style alternation
+# that plain TOCF+PACE degenerates into.
+#
+# Ablation position:
+#   - vs bfcl_gcce_hindsight.yaml : isolates the value of D-Patch.
+#   - vs bfcl_coevo_d_uniform.yaml: isolates the value of CGA gating.
+#   - vs bfcl_gcce_full.yaml       : CoEvo-D replaces SEAL cap-gap buffer
+#                                    with a stronger ground-truth channel.
+#
+# Prereqs (run once):
+#   python scripts/build_bfcl_demo_pool.py \
+#     --train-parquet data/bfcl_train_400.parquet \
+#     --output        data/bfcl_demo_pool_400.json
+
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
+defaults:
+  - ppo_trainer
+  - agentevolver
+  - _self_
+
+data:
+  train_files: data/bfcl_train_400.parquet
+  val_files:   data/bfcl_test_400.parquet
+  train_batch_size: 16
+  max_prompt_length: 8192
+  max_response_length: 4096
+  return_raw_chat: true
+  filter_overlong_prompts: false
+  truncation: "error"
+  val_batch_size: 200
+  val_type: "val"
+
+algorithm:
+  gamma: 1.0
+  lam: 1.0
+  adv_estimator: grpo
+  use_kl_in_reward: false
+  loss_agg_mode: "seq-mean-token-mean"
+  kl_penalty: kl
+  kl_ctrl:
+    type: fixed
+    kl_coef: 0.0
+
+actor_rollout_ref:
+  hybrid_engine: true
+  model:
+    path: Qwen/Qwen2.5-7B-Instruct
+    use_remove_padding: true
+    enable_gradient_checkpointing: true
+  rollout:
+    name: vllm
+    mode: async
+    temperature: 1.0
+    n: 8
+    prompt_length: ${data.max_prompt_length}
+    response_length: ${data.max_response_length}
+    max_model_len: 16384
+    gpu_memory_utilization: 0.6
+    tensor_model_parallel_size: 1
+    log_prob_micro_batch_size_per_gpu: 1
+    log_prob_max_token_len_per_gpu: 16384
+    val_kwargs:
+      n: 1
+      temperature: 0
+    multi_turn:
+      enable: true
+      format: llama3_json
+      max_steps: 20
+      completion_callback: agentevolver.module.trainer.simple_completion_callback.SimpleCompletionCallback
+      tool_config_path: ""
+    max_env_worker: 32
+    sparse: true
+  actor:
+    optim:
+      lr: 1e-6
+    use_kl_loss: true
+    kl_loss_coef: 0.001
+    kl_loss_type: low_var_kl
+    clip_ratio: 0.2
+    clip_ratio_low: 0.2
+    clip_ratio_high: 0.2
+    off_cliprange_high: 1.0
+    clip_ratio_c: 10.0
+    grad_clip: 1.0
+    entropy_coeff: 0
+    ppo_micro_batch_size_per_gpu: 1
+    ppo_mini_batch_size: 8
+    ppo_max_token_len_per_gpu: 16384
+    loss_agg_mode: token-mean
+    fsdp_config:
+      param_offload: false
+      optimizer_offload: false
+  ref:
+    log_prob_micro_batch_size_per_gpu: 1
+    log_prob_max_token_len_per_gpu: 16384
+    fsdp_config:
+      param_offload: true
+
+critic:
+  grad_clip: 1.0
+  cliprange_value: 0.5
+  ppo_max_token_len_per_gpu: 16384
+  forward_max_token_len_per_gpu: 16384
+
+env_service:
+  env_type: "bfcl"
+  env_url: "http://127.0.0.1:8082"
+  env_feedin_preference: code
+  bfcl:
+    strict_tool_parser: true
+    enforce_available_tools: true
+    tool_prompt_mode: t3rl_text
+    tool_result_mode: plain_user
+    eval_policy: clean
+
+trainer:
+  n_gpus_per_node: 4
+  nnodes: 1
+  critic_warmup: 0
+  logger: ["console"]
+  project_name: "bfcl_coevo_d"
+  experiment_name: "bfcl_coevo_d_full_400x400"
+  save_freq: 0
+  save_best_checkpoint: false
+  keep_only_best_checkpoint: true
+  save_limit: 0
+  test_freq: 10
+  total_epochs: 10
+  val_before_train: true
+  val_only: false
+
+task_manager:
+  n: 0
+  train_data_path: tasks_explored.train.json
+  val_data_path: tasks_explored.val.json
+  llm_client: qwen-plus
+  env_profile: cookbook/env_profiles/bfcl.json
+  bs: ${data.train_batch_size}
+  num_explore_threads: ${thread_pool.max_workers}
+  mixture:
+    use_original_tasks: true
+    synthetic_data_ratio: 0.0
+    shuffle: true
+  grader:
+    # Keep bfcl-dense-env here so TOCFStats still gets a per-category
+    # failure rate to feed CGA; F-Patch partial-credit cap is lowered
+    # below (see tocf.feedback.dense_reward) to minimise reward-shape
+    # bias without disabling the stats channel.
+    original_grader: bfcl-dense-env
+    synthetic_grader: llm-binary-gt-no_constraint
+  strategy: random
+  strategy_args:
+    max_explore_step: 30
+    max_llm_retries: 6
+    env_url: ${env_service.env_url}
+    exploration_llm_temperature: 1.0
+    exploration_llm_top_p: 1.0
+    exploration_llm_top_k: 100
+
+exp_manager:
+  val_rollout_mode: "woexp"
+  train_rollout_mode: "woexp"
+  rollout_ratio: 0.0
+  train_sample_mode: "alldiscard"
+  train_sample_keepratio: 1.0
+  experience_template: "\n\nSome Related Experience to help you to complete the task:<EXP>{}</EXP>\n\n"
+  init_exp_before_training: false
+  init_exp_only: false
+  summary_batch_size: 8
+  reme:
+    base_url: "http://127.0.0.1:8001"
+    workspace_id: "default"
+    enable_summarizer: false
+    enable_context_generator: false
+    retrieve_top_k: 3
+    updated_freq: 0
+
+attribution_driven_credit_assignment:
+  enable: false
+
+# ── TOCF (environment side) ──────────────────────────────────────────────────
+# T-Patch reweights sampling; D-Patch (new, below) injects gold demos.
+# F-Patch dense reward is **disabled by default** here because our own
+# ablation showed it's a net-negative on BFCL at small scale. If you
+# want to reproduce the F-Patch row, flip enable=true inside dense_reward.
+tocf:
+  enable: true
+  stats:
+    enable: true
+    dump_dir: experiments/bfcl_coevo_d/tocf_stats
+  task_distribution:
+    enable: true
+    category_weights:
+      multi_turn_base: 1.0
+      multi_turn_miss_param: 1.0
+      multi_turn_miss_func: 1.0
+      multi_turn_long_context: 1.0
+    target_size: null
+    replacement: true
+    alpha: 1.0
+    min_weight: 0.2
+    max_weight: 3.0
+    min_samples: 8
+    complexity_lambda: 0.0
+    accept_threshold: -1.0
+  query_suffix:
+    enable: false
+    suffix: "Before calling a function, verify required parameters and preconditions."
+    apply_to_validation: false
+  feedback:
+    dense_reward:
+      # Disabled: empirical study shows F-Patch's partial-credit signal
+      # disagrees with the binary eval metric and is a net negative at
+      # this scale. Re-enable only when you explicitly want to ablate
+      # F-Patch in the paper table.
+      enable: false
+      partial_credit_cap: 0.7
+      partial_credit_weight: 1.0
+      cap_decay: false
+      min_cap: 0.1
+
+  # ── D-Patch (new, CoEvo-D) ─────────────────────────────────────────
+  # Per-task ground-truth demonstration injection. The ``pool_path`` is
+  # produced offline by scripts/build_bfcl_demo_pool.py. Rates below are
+  # the defaults; when ``gcce.enable=true`` the *actual* rate per category
+  # is driven by the GCCERouter's demo_rate(c) and these numbers only act
+  # as min/max clamps. When GCCE is off, ``uniform_rate`` is used flat.
+  demo_patch:
+    enable: true
+    pool_path: data/bfcl_demo_pool_400.json
+    uniform_rate: 0.125   # 1 out of rollout.n=8 by default
+    max_rate: 0.5
+    min_rate: 0.0
+    alpha_demo: 1.5       # router α_α for demo_advantage_scale
+    min_per_category_fraction: 0.0
+    rate_decay_per_epoch: 0.0
+    seed: 0
+
+# ── PACE (disabled, GCCE supersedes on policy side) ─────────────────────────
+pace:
+  enable: false
+  advantage_weighting:
+    enable: false
+
+# ── GCCE: CGA router drives both env (D-Patch rate) and policy (demo amp) ───
+gcce:
+  enable: true
+  teacher:
+    enable: false
+    cache_path: data/teacher_scores_bfcl_400.json
+    default_success: 0.0
+  oracle_env:
+    enable: false
+    probe_every_epochs: 2
+    probe_sample_size: 16
+    oracle_success_prior: 1.0
+    dump_dir: experiments/bfcl_coevo_d/gcce_oracle
+    overrides:
+      tocf.query_suffix.enable: true
+      tocf.query_suffix.apply_to_validation: false
+      tocf.feedback.dense_reward.enable: true
+      tocf.feedback.dense_reward.partial_credit_cap: 1.0
+      tocf.feedback.dense_reward.partial_credit_weight: 1.0
+
+  attribution:
+    source: hindsight
+    min_samples: 4
+    prior_strength: 4.0
+    use_total_stats: false
+    clip_min: 0.0
+    clip_max: 1.0
+
+  hindsight:
+    enable: true
+    env_block_token: "[ENV_BLOCK]"
+    failure_threshold: 1.0
+    max_attributions_per_step: 64
+    verify_correction: false
+    sampling_params:
+      temperature: 0.0
+      max_tokens: 256
+
+  router:
+    eta: 0.02
+    alpha_env: 2.0
+    alpha_policy: 1.0
+    min_weight: 0.2
+    max_weight: 3.0
+    total_budget: 1.0
+    base_weights:
+      multi_turn_base: 1.0
+      multi_turn_miss_param: 1.0
+      multi_turn_miss_func: 1.0
+      multi_turn_long_context: 1.0
+    # CoEvo-D-specific router outputs. These define how the (Δ_E, Δ_π)
+    # split gets fanned out to both sides of the system:
+    #   demo_rate(c)          = clip(demo_rate_base + alpha_demo_rate * r_E(c))
+    #   demo_adv_scale(c)     = clip(1 + alpha_demo_adv * r_π(c))
+    # alpha_demo_rate * max(r_E) = 0.4 -> max demo_rate ~= 0.52 > max_rate,
+    # so max_rate in tocf.demo_patch acts as a hard ceiling.
+    coevo_d:
+      demo_rate_base: 0.125
+      demo_rate_max: 0.5
+      demo_rate_min: 0.0
+      alpha_demo_rate: 0.4
+      alpha_demo_adv: 1.5
+      demo_adv_min: 1.0
+      demo_adv_max: 3.0
+
+  advantage_weighting:
+    enable: true
+    apply_to: positive_advantage
+    advantage_threshold: 0.0
+    reward_threshold: 0.0
+    success_reward_threshold: 1.0
+    metric_prefix: gcce/advantage_weighting
+    # Demo rows (is_demo=True) get their advantage multiplied by
+    # router.demo_advantage_scale(c) instead of the standard
+    # advantage_weight(c). Flip this off to run the "demo without
+    # amplification" ablation.
+    demo_amplify_enable: true
+
+# SEAL cap-gap buffer is superseded here by D-Patch's direct gold injection,
+# which is a stronger and cheaper signal source than LM-generated corrections.
+seal:
+  cap_gap_explore:
+    enable: false

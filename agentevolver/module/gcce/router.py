@@ -34,6 +34,18 @@ class RouteDecision:
     r_policy: dict[str, float] = field(default_factory=dict)
     patch_budget: dict[str, float] = field(default_factory=dict)
     env_category_weights: dict[str, float] = field(default_factory=dict)
+    # CoEvo-D additions: co-evolution cares about two *paired* signals
+    # derived from the *same* (Delta_E, Delta_pi) estimator.
+    #   demo_rate   : how often the environment should emit a
+    #                 ground-truth demonstration for this category.
+    #                 Monotone in Delta_E(c) (env needs to hint more
+    #                 where the env gap is larger).
+    #   demo_advantage_scale : how strongly the policy should amplify
+    #                 the advantage on demo rows for this category.
+    #                 Monotone in Delta_pi(c) (policy needs to learn
+    #                 the demo harder where its own gap is larger).
+    demo_rate: dict[str, float] = field(default_factory=dict)
+    demo_advantage_scale: dict[str, float] = field(default_factory=dict)
     total_regret_bound: float = 0.0
     summary: str = ""
 
@@ -52,6 +64,23 @@ class GCCERouter:
             _cfg_get(router_cfg, "base_weights", {}) or {}
         )
         self.total_budget = float(_cfg_get(router_cfg, "total_budget", 1.0))
+
+        # CoEvo-D router fields. These are cheap to always compute; the
+        # consumer (DemoInjector / advantage-weighting) decides whether to
+        # use them based on its own ``enable`` flag. We keep them inside
+        # GCCERouter so the co-evolution coupling is visibly "one router
+        # drives both sides" -- which is the paper's main claim.
+        coevo_cfg = _cfg_get(router_cfg, "coevo_d", {}) or {}
+        self.demo_rate_base = float(_cfg_get(coevo_cfg, "demo_rate_base", 0.125))
+        self.demo_rate_max = float(_cfg_get(coevo_cfg, "demo_rate_max", 0.5))
+        self.demo_rate_min = float(_cfg_get(coevo_cfg, "demo_rate_min", 0.0))
+        # Linear map  demo_rate(c) = base + alpha_demo_rate * r_E(c)  clipped
+        self.alpha_demo_rate = float(_cfg_get(coevo_cfg, "alpha_demo_rate", 0.4))
+        # Linear map  demo_adv_scale(c) = 1 + alpha_demo_adv * r_pi(c) clipped
+        self.alpha_demo_adv = float(_cfg_get(coevo_cfg, "alpha_demo_adv", 1.5))
+        self.demo_adv_min = float(_cfg_get(coevo_cfg, "demo_adv_min", 1.0))
+        self.demo_adv_max = float(_cfg_get(coevo_cfg, "demo_adv_max", 3.0))
+
         self.latest: RouteDecision | None = None
 
     def route(self, gaps: Mapping[str, CategoryGap], category_probs: Mapping[str, float] | None = None) -> RouteDecision:
@@ -63,6 +92,8 @@ class GCCERouter:
         r_pol: dict[str, float] = {}
         env_weights: dict[str, float] = {}
         patch_budget: dict[str, float] = {}
+        demo_rate: dict[str, float] = {}
+        demo_adv: dict[str, float] = {}
 
         total_gap = sum(max(0.0, g.delta_e) * _cat_prob(category_probs, c) for c, g in gaps.items())
 
@@ -88,8 +119,22 @@ class GCCERouter:
             else:
                 patch_budget[category] = 0.0
 
+            # CoEvo-D coupled signals.
+            demo_rate[category] = _clip(
+                self.demo_rate_base + self.alpha_demo_rate * r_e,
+                self.demo_rate_min,
+                self.demo_rate_max,
+            )
+            demo_adv[category] = _clip(
+                1.0 + self.alpha_demo_adv * r_p,
+                self.demo_adv_min,
+                self.demo_adv_max,
+            )
+
         summary = ", ".join(
-            f"{c}(r_E={r_env[c]:.2f}, r_π={r_pol[c]:.2f}, w_env={env_weights[c]:.2f}, b={patch_budget[c]:.2f})"
+            f"{c}(r_E={r_env[c]:.2f}, r_π={r_pol[c]:.2f}, "
+            f"w_env={env_weights[c]:.2f}, b={patch_budget[c]:.2f}, "
+            f"ρ_D={demo_rate[c]:.2f}, α_D={demo_adv[c]:.2f})"
             for c in gaps
         )
         total_bound = sum(max(0.0, g.delta_e) + max(0.0, g.delta_pi) for g in gaps.values())
@@ -100,6 +145,8 @@ class GCCERouter:
             r_policy=r_pol,
             patch_budget=patch_budget,
             env_category_weights=env_weights,
+            demo_rate=demo_rate,
+            demo_advantage_scale=demo_adv,
             total_regret_bound=float(total_bound),
             summary=summary,
         )
@@ -132,6 +179,37 @@ class GCCERouter:
             return {}
         return dict(self.latest.env_category_weights)
 
+    # ------------------------------------------------------------------ CoEvo-D
+    def demo_rate(self, category: str) -> float:
+        """Per-category demonstration injection rate for D-Patch.
+
+        Consumed by ``agentevolver.module.tocf.demo_patch.DemoInjector``.
+        If the router has no decision yet, return the base rate so that
+        cold-start still exercises the D-Patch path.
+        """
+        if self.latest is None or not self.latest.demo_rate:
+            return _clip(
+                self.demo_rate_base, self.demo_rate_min, self.demo_rate_max
+            )
+        return float(
+            self.latest.demo_rate.get(
+                category,
+                _clip(self.demo_rate_base, self.demo_rate_min, self.demo_rate_max),
+            )
+        )
+
+    def demo_advantage_scale(self, category: str) -> float:
+        """Multiplicative scale on the advantages of demo rows.
+
+        Consumed by ``apply_gcce_advantage_weighting`` when it processes
+        rows flagged ``is_demo=True``. Fall back to ``demo_adv_min`` when
+        the router has no decision yet (effectively: no amplification,
+        just GRPO's normal handling of the positive demo sample).
+        """
+        if self.latest is None or not self.latest.demo_advantage_scale:
+            return float(self.demo_adv_min)
+        return float(self.latest.demo_advantage_scale.get(category, self.demo_adv_min))
+
     # ------------------------------------------------------------------ logging
     def metrics(self, prefix: str = "gcce/router") -> dict[str, float]:
         result: dict[str, float] = {f"{prefix}/enabled": 1.0 if self.enabled else 0.0}
@@ -144,6 +222,10 @@ class GCCERouter:
             result[f"{prefix}/{safe}/r_policy"] = float(self.latest.r_policy.get(category, 0.0))
             result[f"{prefix}/{safe}/patch_budget"] = float(self.latest.patch_budget.get(category, 0.0))
             result[f"{prefix}/{safe}/env_weight"] = float(self.latest.env_category_weights.get(category, 1.0))
+            result[f"{prefix}/{safe}/demo_rate"] = float(self.latest.demo_rate.get(category, 0.0))
+            result[f"{prefix}/{safe}/demo_adv_scale"] = float(
+                self.latest.demo_advantage_scale.get(category, 1.0)
+            )
         return result
 
 
