@@ -70,6 +70,148 @@ PLACEHOLDER_TOOL_RESULT = {"status": "ok"}
 
 
 # ---------------------------------------------------------------------------
+# Env-format alignment (CRITICAL)
+# ---------------------------------------------------------------------------
+# The SFT warm-start has to see the **same** system prompt + tool-result
+# formatting that the BFCL env streams to the model at rollout/eval
+# time. Otherwise the policy learns a format that does not exist at
+# deployment and validation score collapses to 0.
+#
+# Both pieces below are a **frozen copy** of:
+#   env_service/environments/bfcl/bfcl_env.py
+#     - ``T3RL_BFCL_SYSTEM_PROMPT`` (module top)
+#     - ``tools_schema_to_qwen_prompt(..., prompt_mode="t3rl_text")``
+#     - ``tool_message_to_qwen_text(..., result_mode="plain_user")``
+#
+# If that file changes, mirror the change here or the SFT pool will
+# start drifting again. We intentionally do *not* import from
+# env_service because this script is a purely offline data prep tool
+# and env_service pulls in the whole BFCL eval stack.
+_T3RL_BFCL_SYSTEM_PROMPT = """You are an expert in composing functions. You are given a question and a set of possible functions. Based on the question, you will need to make one or more function/tool calls to achieve the purpose.
+
+Your response must always start with your step-by-step reasoning process enclosed in `<thinking></thinking>` XML tags. This is for you to outline your plan and justify your chosen actions.
+
+After the thinking block, you will perform one of the following actions:
+
+1. If tool calls are necessary: For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags.
+Examples:
+<tool_call>\n{"name":"func1", "arguments":{...}}\n</tool_call>\n<tool_call>\n{"name":"func2", "arguments":{...}}\n</tool_call>
+
+2. If no tool calls are necessary or possible: Directly provide a user-facing response in plain text. This applies if none of the functions can be used, or if the given question lacks the parameters required by the function.
+
+At each turn, you should try your best to complete the tasks requested by the user within the current turn. Continue to output functions to call until you have fulfilled the user's request to the best of your ability. Once you have no more functions to call, the system will consider the current turn complete and proceed to the next turn or task."""
+
+
+def _tools_schema_to_qwen_prompt_t3rl(tools_schema: list[dict[str, Any]]) -> str:
+    """Inlined mirror of ``tools_schema_to_qwen_prompt(..., "t3rl_text")``.
+
+    Produces the exact text the BFCL env puts in the ``system`` message
+    for every rollout with ``tool_prompt_mode=t3rl_text``.
+    """
+    if not tools_schema:
+        return _T3RL_BFCL_SYSTEM_PROMPT.strip()
+    lines: list[str] = [_T3RL_BFCL_SYSTEM_PROMPT.strip()]
+    lines.append("\n\n# Tools\n")
+    lines.append(
+        "You are provided with function signatures within <tools></tools> XML tags:"
+    )
+    lines.append("<tools>")
+    for tool in tools_schema:
+        lines.append(
+            json.dumps(tool, ensure_ascii=False, separators=(",", ":"))
+        )
+    lines.append("</tools>\n")
+    return "\n".join(lines)
+
+
+def _tool_result_to_plain_user_text(
+    tool_name: str, result_payload: Any
+) -> str:
+    """Mirror of env's ``tool_message_to_qwen_text(..., "plain_user")``.
+
+    Returns the ``content`` body the env hands back as a ``user`` role
+    message after the assistant's tool_call block. We keep the trailing
+    newline behaviour identical (env joins entries with ``\\n`` and
+    appends ``\\n``) for token-level parity with real rollouts.
+    """
+    if isinstance(result_payload, str):
+        content_text = result_payload
+    else:
+        content_text = json.dumps(result_payload, ensure_ascii=False)
+    return f"Tool result from {tool_name}:\n{content_text}\n"
+
+
+# ---------------------------------------------------------------------------
+# Tool schema extraction: try parquet, fall back to env's JSONL
+# ---------------------------------------------------------------------------
+def _extract_tools_from_row(row: pd.Series) -> list[dict[str, Any]]:
+    """Best-effort tools/function schema extraction from a parquet row.
+
+    Tries the most likely keys in order. Returns [] if nothing is found;
+    the caller can then use the BFCL-JSONL fallback.
+    """
+    def _normalise(value: Any) -> list[dict[str, Any]] | None:
+        if value is None:
+            return None
+        if hasattr(value, "tolist"):
+            value = value.tolist()
+        if isinstance(value, (list, tuple)):
+            out = [dict(x) for x in value if isinstance(x, dict)]
+            return out if out else None
+        return None
+
+    for container_key in ("extra_info", "reward_model"):
+        container = row.get(container_key)
+        if isinstance(container, dict):
+            for key in ("function", "functions", "tools", "tool_schema"):
+                v = _normalise(container.get(key))
+                if v:
+                    return v
+            inter = container.get("interaction_kwargs")
+            if isinstance(inter, dict):
+                for key in ("function", "functions", "tools", "tool_schema"):
+                    v = _normalise(inter.get(key))
+                    if v:
+                        return v
+
+    for key in ("function", "functions", "tools", "tool_schema"):
+        v = _normalise(row.get(key))
+        if v:
+            return v
+
+    return []
+
+
+def _load_bfcl_jsonl_index(path: Path | None) -> dict[str, dict[str, Any]]:
+    """Build an ``id -> record`` map from the env's BFCL JSONL.
+
+    Matches the env's own loader: one JSON object per line keyed by
+    ``id``. Used as the canonical fallback for the tools schema when
+    parquet rows do not carry it.
+    """
+    if path is None:
+        return {}
+    if not path.exists():
+        print(f"[demo_pool] warn: --bfcl-jsonl path does not exist: {path}", file=sys.stderr)
+        return {}
+    index: dict[str, dict[str, Any]] = {}
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            tid = rec.get("id") or rec.get("task_id")
+            if tid:
+                index[str(tid)] = rec
+    print(f"[demo_pool] loaded {len(index)} BFCL JSONL records from {path}")
+    return index
+
+
+# ---------------------------------------------------------------------------
 # Ground-truth flattening
 # ---------------------------------------------------------------------------
 def _as_list(value: Any) -> list:
@@ -230,36 +372,62 @@ def _render_assistant_turn(gold_calls: list[str]) -> str:
 def _render_tool_result_turn(gold_calls: list[str]) -> str:
     """Render a synthetic user-role tool-result block.
 
-    BFCL multi-turn replays *one* user message per turn that contains the
-    concatenated stringified tool results. For a demonstration trajectory
-    the exact result doesn't matter because loss is masked out on these
-    tokens; we just need tokenisation to succeed and the shape to look
-    plausible so that multi-turn structure is preserved.
+    Matches the **env's** ``tool_message_to_qwen_text(result_mode="plain_user")``
+    format exactly so that at SFT time the model sees the same boundary
+    tokens between its own assistant output and the subsequent user
+    message as it does at rollout time. Divergence here is what killed
+    the previous SFT run: the env emits
+    ``"Tool result from <name>:\\n<content>\\n"`` between turns, and any
+    other shape (``[TOOL_RESULTS]\\n...``, JSON-wrapped, etc.) makes the
+    policy learn a distribution that simply does not exist at
+    deployment.
+
+    BFCL multi-turn replays *one* user message per turn that
+    concatenates all tool results, so we concatenate all gold tool
+    calls' stub results here as well.
     """
-    bodies = []
+    bodies: list[str] = []
     for expr in gold_calls:
         payload = _parse_tool_call_source(expr)
         bodies.append(
-            json.dumps(
-                {"tool": payload["name"], "result": PLACEHOLDER_TOOL_RESULT},
-                ensure_ascii=False,
-            )
+            _tool_result_to_plain_user_text(payload["name"], PLACEHOLDER_TOOL_RESULT)
         )
-    return "[TOOL_RESULTS]\n" + "\n".join(bodies)
+    return "".join(bodies).rstrip("\n")
 
 
 # ---------------------------------------------------------------------------
 # Main builder
 # ---------------------------------------------------------------------------
-def build_demo_for_row(row: pd.Series) -> dict[str, Any] | None:
+def build_demo_for_row(
+    row: pd.Series,
+    bfcl_index: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
     gold_turns = _extract_ground_truth_per_turn(row)
     if not gold_turns:
         return None
 
     user_questions = _extract_turn_questions(row)
-    system_prompt = _extract_system_prompt(row)
     category = _extract_category(row)
     task_id = _extract_task_id(row)
+
+    # Tools schema: try parquet first, then the env's JSONL index, then
+    # give up and use a tool-less system prompt (still coherent --
+    # matches env's own behaviour when tools_schema is empty).
+    tools = _extract_tools_from_row(row)
+    if not tools and bfcl_index is not None:
+        rec = bfcl_index.get(task_id)
+        if rec is not None:
+            tools = rec.get("function") or rec.get("functions") or []
+            if hasattr(tools, "tolist"):
+                tools = tools.tolist()
+            tools = [dict(t) for t in tools if isinstance(t, dict)]
+
+    # Compose the system prompt via the env's own recipe. This is the
+    # text the BFCL env feeds the policy at rollout/eval time via
+    # ``BfclEnv.get_init_state`` -> ``tools_schema_to_qwen_prompt(...,
+    # prompt_mode="t3rl_text")``. SFT MUST see the same string or the
+    # policy goes out of distribution and val score collapses to 0.
+    system_prompt = _tools_schema_to_qwen_prompt_t3rl(tools)
 
     while len(user_questions) < len(gold_turns):
         user_questions.append("(continued)")
@@ -302,28 +470,35 @@ def build_demo_for_row(row: pd.Series) -> dict[str, Any] | None:
         "reward": 1.0,
         "num_turns": len(gold_turns),
         "num_calls": sum(len(t) for t in gold_turns),
+        "num_tools": len(tools),
     }
 
 
 def build_pool(
-    rows: Iterable[pd.Series], max_tasks: int | None = None
+    rows: Iterable[pd.Series],
+    max_tasks: int | None = None,
+    bfcl_index: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, dict[str, Any]]:
     pool: dict[str, dict[str, Any]] = {}
     n_total = 0
     n_skipped = 0
+    n_no_tools = 0
     for row in rows:
         n_total += 1
-        demo = build_demo_for_row(row)
+        demo = build_demo_for_row(row, bfcl_index=bfcl_index)
         if demo is None:
             n_skipped += 1
             continue
+        if demo.get("num_tools", 0) == 0:
+            n_no_tools += 1
         pool[demo["task_id"]] = demo
         if max_tasks is not None and len(pool) >= max_tasks:
             break
 
     print(
         f"[demo_pool] processed {n_total} rows, built {len(pool)} demos, "
-        f"skipped {n_skipped} (no ground_truth)."
+        f"skipped {n_skipped} (no ground_truth), "
+        f"{n_no_tools} without tools schema."
     )
     by_cat: dict[str, int] = {}
     for v in pool.values():
@@ -356,6 +531,17 @@ def main() -> int:
         default=None,
         help="Cap the number of demos for smoke tests.",
     )
+    parser.add_argument(
+        "--bfcl-jsonl",
+        default=None,
+        help=(
+            "Optional path to the BFCL env's canonical multi-turn JSONL "
+            "(e.g. ./bfcl_data/multiturn_data.jsonl). Used as a fallback "
+            "when the parquet rows do not carry a tools/function schema. "
+            "This is the same file the env loads at runtime via "
+            "BFCL_DATA_PATH, so the tools schema matches bit-for-bit."
+        ),
+    )
     args = parser.parse_args()
 
     train_path = Path(args.train_parquet)
@@ -366,7 +552,11 @@ def main() -> int:
     df = pd.read_parquet(train_path)
     print(f"[demo_pool] loaded {len(df)} rows from {train_path}")
 
-    pool = build_pool(_iter_rows(df), max_tasks=args.max_tasks)
+    bfcl_index = _load_bfcl_jsonl_index(
+        Path(args.bfcl_jsonl) if args.bfcl_jsonl else None
+    )
+
+    pool = build_pool(_iter_rows(df), max_tasks=args.max_tasks, bfcl_index=bfcl_index)
 
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
