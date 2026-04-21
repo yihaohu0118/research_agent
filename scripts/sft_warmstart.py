@@ -271,7 +271,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-ratio", type=float, default=0.1)
     parser.add_argument("--logging-steps", type=int, default=5)
     parser.add_argument("--save-strategy", default="epoch")
-    parser.add_argument("--evaluation-strategy", default="epoch")
+    # Renamed from ``evaluation_strategy`` to ``eval_strategy`` in
+    # transformers >= 4.46; we keep the CLI flag under the new name.
+    parser.add_argument("--eval-strategy", default="epoch")
     parser.add_argument("--save-total-limit", type=int, default=1)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
@@ -358,7 +360,7 @@ def main() -> None:
         weight_decay=args.weight_decay,
         logging_steps=args.logging_steps,
         save_strategy=args.save_strategy,
-        evaluation_strategy=args.evaluation_strategy if eval_ds else "no",
+        eval_strategy=args.eval_strategy if eval_ds else "no",
         save_total_limit=args.save_total_limit,
         bf16=args.bf16,
         gradient_checkpointing=args.gradient_checkpointing,
