@@ -80,6 +80,10 @@ class GCCERouter:
         self.alpha_demo_adv = float(_cfg_get(coevo_cfg, "alpha_demo_adv", 1.5))
         self.demo_adv_min = float(_cfg_get(coevo_cfg, "demo_adv_min", 1.0))
         self.demo_adv_max = float(_cfg_get(coevo_cfg, "demo_adv_max", 3.0))
+        # Optional per-category floors. This is the smallest useful lever
+        # for BFCL: preserve the global CGA signal, but guarantee that the
+        # weakest categories never get starved of demos or demo amplification.
+        self.category_overrides = _cfg_get(coevo_cfg, "category_overrides", {}) or {}
 
         self.latest: RouteDecision | None = None
 
@@ -120,16 +124,35 @@ class GCCERouter:
                 patch_budget[category] = 0.0
 
             # CoEvo-D coupled signals.
-            demo_rate[category] = _clip(
+            rate = _clip(
                 self.demo_rate_base + self.alpha_demo_rate * r_e,
                 self.demo_rate_min,
                 self.demo_rate_max,
             )
-            demo_adv[category] = _clip(
+            rate_floor = self._category_floor(
+                category,
+                "demo_rate_floor",
+                self.demo_rate_min,
+                self.demo_rate_max,
+            )
+            if rate_floor is not None:
+                rate = max(rate, rate_floor)
+            demo_rate[category] = rate
+
+            adv = _clip(
                 1.0 + self.alpha_demo_adv * r_p,
                 self.demo_adv_min,
                 self.demo_adv_max,
             )
+            adv_floor = self._category_floor(
+                category,
+                "demo_adv_floor",
+                self.demo_adv_min,
+                self.demo_adv_max,
+            )
+            if adv_floor is not None:
+                adv = max(adv, adv_floor)
+            demo_adv[category] = adv
 
         summary = ", ".join(
             f"{c}(r_E={r_env[c]:.2f}, r_π={r_pol[c]:.2f}, "
@@ -227,6 +250,21 @@ class GCCERouter:
                 self.latest.demo_advantage_scale.get(category, 1.0)
             )
         return result
+
+    def _category_floor(
+        self,
+        category: str,
+        key: str,
+        lo: float,
+        hi: float,
+    ) -> Optional[float]:
+        overrides = _cfg_get(self.category_overrides, category, None)
+        if overrides is None:
+            return None
+        value = _cfg_get(overrides, key, None)
+        if value is None:
+            return None
+        return _clip(float(value), lo, hi)
 
 
 def _clip(value: float, lo: float, hi: float) -> float:
