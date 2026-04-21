@@ -417,6 +417,29 @@ class DemoTrajectory:
         return tokenised
 
     # ---------------- cmt-compatible surface ----------------
+    def json(self) -> str:
+        """Serialise the demo to JSON for ``rollout_data_dir`` dumps.
+
+        Mirrors ``cmt_linear.CMTLinear.json()`` so the trainer's
+        post-step trajectory dump (``traj.json()`` in
+        ``ae_ray_trainer.fit``) works identically on demo rows.
+        """
+        return json.dumps(
+            {
+                "task_id": self.task_id,
+                "data_id": self.data_id,
+                "rollout_id": self.rollout_id,
+                "is_demo": True,
+                "category": self.metadata.get("category"),
+                "reward": self.reward.outcome,
+                "num_turns": self._spec.get("num_turns"),
+                "num_calls": self._spec.get("num_calls"),
+                "messages": self._messages(),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
     def group_tokenize(self) -> list[Sample]:
         t = self._tokenise()
         input_ids = t.prompt_ids + t.response_ids
