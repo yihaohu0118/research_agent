@@ -253,32 +253,75 @@ def _extract_ground_truth_per_turn(row: pd.Series) -> list[list[str]]:
     turns: list[list[str]] = []
     for item in outer:
         inner = _as_list(item)
-        if not inner:
-            continue
         turns.append([str(step) for step in inner])
     return turns
 
 
 def _extract_turn_questions(row: pd.Series) -> list[str]:
-    """Pull per-turn user messages. Falls back to prompt's first user msg."""
-    questions: list[str] = []
-    if isinstance(row.get("extra_info"), dict):
-        raw_q = row["extra_info"].get("question")
-        for item in _as_list(raw_q):
+    """Pull per-turn user messages with BFCL/EnvTuning-specific alignment.
+
+    For vanilla BFCL parquet files, user turns often live under
+    ``extra_info.question`` or ``extra_info.interaction_kwargs.question``.
+    For EnvTuning-style processed parquet files, *follow-up* user prompts
+    are more reliably stored in ``interaction_kwargs.processed_question``.
+
+    We therefore build the turn list as:
+      turn-1 : first explicit user question (question/prompt)
+      turn>1 : prefer processed_question[turn-1], else question[turn]
+
+    This matters for ``miss_func`` especially: the final supervised turn is
+    often conditioned on an updated tool list prompt that only appears in
+    ``processed_question``.
+    """
+    nested_questions: list[str] = []
+    processed_questions: list[str] = []
+
+    def _collect_nested_user_messages(raw_value: Any) -> None:
+        for item in _as_list(raw_value):
             inner = _as_list(item)
             for msg in inner:
                 if isinstance(msg, dict) and msg.get("role") == "user":
                     content = msg.get("content", "")
                     if content:
-                        questions.append(str(content))
+                        nested_questions.append(str(content))
 
-    if questions:
-        return questions
+    if isinstance(row.get("extra_info"), dict):
+        extra_info = row["extra_info"]
+        _collect_nested_user_messages(extra_info.get("question"))
 
+        interaction = extra_info.get("interaction_kwargs")
+        if isinstance(interaction, dict):
+            _collect_nested_user_messages(interaction.get("question"))
+            for item in _as_list(interaction.get("processed_question")):
+                if item is None:
+                    continue
+                text = str(item).strip()
+                if text:
+                    processed_questions.append(text)
+
+    prompt_first_user = ""
     prompt = _as_list(row.get("prompt"))
     for msg in prompt:
         if isinstance(msg, dict) and msg.get("role") == "user":
-            questions.append(str(msg.get("content", "")))
+            prompt_first_user = str(msg.get("content", ""))
+            if prompt_first_user:
+                break
+
+    first_turn = nested_questions[0] if nested_questions else prompt_first_user
+    if not first_turn:
+        return []
+
+    max_turns = max(1, len(nested_questions), len(processed_questions) + 1)
+    questions: list[str] = [first_turn]
+    for turn_idx in range(1, max_turns):
+        content = ""
+        processed_idx = turn_idx - 1
+        if processed_idx < len(processed_questions):
+            content = processed_questions[processed_idx]
+        elif turn_idx < len(nested_questions):
+            content = nested_questions[turn_idx]
+        if content:
+            questions.append(content)
     return questions
 
 
