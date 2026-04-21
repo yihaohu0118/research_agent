@@ -270,7 +270,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-seq-length", type=int, default=12288)
     parser.add_argument("--eval-ratio", type=float, default=0.1)
     parser.add_argument("--logging-steps", type=int, default=5)
-    parser.add_argument("--save-strategy", default="epoch")
+    # ``no`` by default: for a 15-25 min SFT job, mid-training
+    # checkpoints just trigger the FSDP torch.save zip-writer bug
+    # (RuntimeError: unexpected pos X vs X when state dict ~24 GB).
+    # The final ``trainer.save_model`` at the end uses safetensors and
+    # FULL_STATE_DICT, which is both correct and the only checkpoint
+    # we actually need as a GRPO init.
+    parser.add_argument("--save-strategy", default="no")
     # Renamed from ``evaluation_strategy`` to ``eval_strategy`` in
     # transformers >= 4.46; we keep the CLI flag under the new name.
     parser.add_argument("--eval-strategy", default="epoch")
@@ -372,11 +378,19 @@ def main() -> None:
             # For Qwen2.5 this is "Qwen2DecoderLayer"; override via the
             # CLI flag for other architectures.
             "transformer_layer_cls_to_wrap": [args.fsdp_transformer_layer_cls_to_wrap],
+            # Gather weights to rank 0 as a FULL state dict on save.
+            # Combined with save_safetensors=True below, this sidesteps
+            # the torch.save zip-writer "unexpected pos X vs X" bug
+            # that triggers when the consolidated state dict approaches
+            # ~24 GB (classic PyTorch + FSDP interaction).
+            "state_dict_type": "FULL_STATE_DICT",
             # NB: do NOT set activation_checkpointing here. We already
             # set gradient_checkpointing=True at the TrainingArguments
             # level; FSDP's own AC on top of that causes a re-entrant
             # autograd warning in transformers 4.53.x.
         },
+        save_safetensors=True,
+        load_best_model_at_end=False,
         report_to=["none"],
         ddp_find_unused_parameters=False,
         seed=args.seed,
