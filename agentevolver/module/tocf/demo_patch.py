@@ -253,14 +253,21 @@ class DemoTrajectory:
         max_response_length: int,
         rollout_id: str,
         data_id: str | None = None,
+        task_id: str | None = None,
     ):
         self._spec = spec
         self._tokenizer = tokenizer
         self.max_prompt_length = int(max_prompt_length)
         self.max_response_length = int(max_response_length)
 
-        self.task_id = str(spec.get("task_id") or data_id or "demo")
-        self.data_id = str(data_id or self.task_id)
+        # ``task_id`` is the human-readable BFCL id that drives
+        # union_gen_batch_via_task_id -> it MUST match an existing
+        # task in the current batch so the demo inherits the prompt
+        # tensors and the GRPO uid. ``data_id`` is the integer-parseable
+        # index of that task in the batch, consumed by env_manager to
+        # build group_ids.
+        self.task_id = str(task_id or spec.get("task_id") or "demo")
+        self.data_id = str(data_id if data_id is not None else "0")
         self.rollout_id = str(rollout_id)
         self.query = self._infer_query(spec.get("messages") or [])
         self.is_terminated = True
@@ -521,8 +528,27 @@ class DemoInjector:
 
     # ------------------------------------------------------------------
     def _build_demo_for_task(
-        self, task_id: str, category: str, rollout_id: str
+        self,
+        task_id: str,
+        category: str,
+        rollout_id: str,
+        data_id: str,
     ) -> DemoTrajectory | None:
+        """Build a DemoTrajectory.
+
+        ``data_id`` must be an integer-parseable string because
+        ``env_manager.samples_to_dataproto`` constructs a
+        ``group_ids = torch.tensor([int(s.data_id) ...])`` tensor.
+        The injector passes the *position of the owning task in the
+        current batch's task list*, which matches exactly what the real
+        rollout pipeline does (see
+        ``env_manager.rollout``: ``for data_id, (task, ...) in enumerate(tasks)``).
+        With the matching data_id, the demo's group_id lines up with
+        the group_id of that task's real rollouts -- the right thing for
+        any downstream grouping that consumes group_ids (e.g. ADCA); and
+        GRPO grouping via uid is handled separately by
+        ``union_gen_batch_via_task_id`` which routes by task_id.
+        """
         spec = self._pool.get(task_id) or self._pool.sample_by_category(
             category, self._rng
         )
@@ -534,7 +560,8 @@ class DemoInjector:
             max_prompt_length=self._max_prompt,
             max_response_length=self._max_response,
             rollout_id=rollout_id,
-            data_id=task_id,
+            data_id=data_id,
+            task_id=task_id,
         )
 
     # ------------------------------------------------------------------
@@ -564,20 +591,13 @@ class DemoInjector:
         if not self.enabled:
             return tasks, trajectories, report
 
-        # Group trajectories by their source task so we know which group to
-        # extend with a demo.
-        by_task: dict[str, list[int]] = {}
-        for idx, traj in enumerate(trajectories):
-            tid = getattr(traj, "data_id", None) or getattr(traj, "task_id", None) or ""
-            by_task.setdefault(str(tid), []).append(idx)
-
         report.total_tasks = len(tasks)
         report.total_rollouts = len(trajectories)
 
         new_trajectories = list(trajectories)
 
         seen_categories: set[str] = set()
-        for task in tasks:
+        for task_idx, task in enumerate(tasks):
             tid = str(getattr(task, "task_id", "") or "")
             category = "unknown"
             if category_getter is not None:
@@ -602,9 +622,14 @@ class DemoInjector:
             if n_demos <= 0:
                 continue
 
+            # The real rollout pipeline uses ``data_id = enumerate index``
+            # of the task in the batch; match that so env_manager's
+            # group_ids tensor (torch.long) can parse ``int(s.data_id)``.
+            data_id = str(task_idx)
+
             for k in range(n_demos):
                 rid = f"demo::{tid}::{k}"
-                demo = self._build_demo_for_task(tid, category, rid)
+                demo = self._build_demo_for_task(tid, category, rid, data_id)
                 if demo is None:
                     continue
                 new_trajectories.append(demo)
