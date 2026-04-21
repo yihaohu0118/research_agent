@@ -11,10 +11,28 @@
 #   - vs bfcl_tocf_mvp.yaml  : isolates how much of the TOCF gain comes
 #                              from T-Patch alone vs. F-Patch dense reward.
 #
-# Design note: with F-Patch OFF, T-Patch reweights category *sampling*
-# frequency using category success rates. Bayesian shrinkage (prior=4,
-# min_samples=8) is kept to avoid early collapse onto one category when
-# a single rollout in a rare category happens to fail.
+# Design notes (why this differs from the other TOCF rows):
+#   1. objective=learning_progress.  Under sparse 0/1 reward the legacy
+#      failure_rate objective over-allocates budget to p≈0 categories, where
+#      GRPO groups are all-zero and produce NO gradient (zero-variance
+#      groups). The learning-progress score 4·p·(1-p) peaks at p=0.5 which
+#      is exactly the regime where GRPO's group-baseline advantage is most
+#      informative, so training effort lands where it can actually move the
+#      policy.
+#   2. Beta shrinkage (prior_strength=4, prior_mean=0.5).  With binary reward
+#      and min_samples-sized windows the MLE success rate bounces by ±20%
+#      between epochs. Shrinkage damps this without biasing steady-state.
+#   3. ema_beta=0.5.  Blend the new target weight with the previous one to
+#      stop epoch-to-epoch weight jumps propagating into the mixture draw.
+#   4. stratified + replacement=false.  Legacy path sampled 400 tasks from
+#      400 with replacement, which let the same hard task appear 3-5x in a
+#      single epoch -- that duplication corrupts GRPO's per-prompt group
+#      baseline. Stratified per-category quotas with within-category no-
+#      replacement keeps category mass where T-Patch wants it without
+#      duplicating individual prompts unless a quota exceeds its pool.
+#   5. stable_seed.  Fixes the legacy (seed + rebuild_count) drift so the
+#      mixture draw is reproducible across runs independent of how often
+#      the controller accepts a patch.
 
 hydra:
   searchpath:
@@ -196,9 +214,8 @@ tocf:
     enable: true
     dump_dir: experiments/bfcl_tocf_tpatch/tocf_stats
 
-  # T-Patch ON: category-weighted task sampling with Bayesian-shrunk success
-  # rates. Same cold-start priors and clipping window as the other TOCF rows
-  # so the only moving variable across the ablation is whether F-Patch is on.
+  # T-Patch ON with sparse-reward-aware objective and stratified sampling.
+  # See the header comment block for the rationale behind each override.
   task_distribution:
     enable: true
     category_weights:
@@ -207,11 +224,35 @@ tocf:
       multi_turn_miss_func: 1.0
       multi_turn_long_context: 1.0
     target_size: null
-    replacement: true
-    alpha: 1.0
-    min_weight: 0.2
-    max_weight: 3.0
-    min_samples: 8
+
+    # Learning-progress objective: weight ∝ 1 + alpha * 4 * p * (1 - p).
+    # Peaks at p=0.5 where GRPO group variance is maximal. Legacy rows keep
+    # "failure_rate" by leaving this knob unset.
+    objective: learning_progress
+
+    # Beta-shrinkage on per-category success rate.
+    prior_strength: 4.0
+    prior_mean: 0.5
+
+    # Inter-epoch EMA on the accepted weights.
+    ema_beta: 0.5
+
+    # Stratified quota sampling avoids within-epoch task duplication that
+    # would otherwise bias the GRPO group baseline.
+    stratified: true
+    stable_seed: true
+    replacement: false
+
+    # alpha slightly smaller than the other TOCF rows: under stratified
+    # sampling the effective mass shift per unit weight is larger, so we
+    # dial the lever down to keep the max weight spread comparable.
+    alpha: 0.75
+    min_weight: 0.5
+    max_weight: 2.0
+    # Relaxed from the default 8. With 4 categories × ~100 tasks each and
+    # n=8 rollouts, every category clears min_samples within the first
+    # epoch-window; 8 was causing cold-start freeze on long_context.
+    min_samples: 4
     complexity_lambda: 0.0
     accept_threshold: -1.0
 

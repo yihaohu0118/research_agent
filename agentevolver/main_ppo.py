@@ -361,6 +361,8 @@ class TaskRunner:
                 seed=42,
                 target_size=tocf_task_distribution_cfg.get("target_size", None),
                 replacement=tocf_task_distribution_cfg.get("replacement", True),
+                stratified=tocf_task_distribution_cfg.get("stratified", False),
+                stable_seed=tocf_task_distribution_cfg.get("stable_seed", False),
             )
         else:
             train_mixture_strategy = UnifiedMixtureStrategy(

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import copy
+import math
 import random
-from collections import Counter
+from collections import Counter, defaultdict
 from typing import Optional, Sequence
 
 from loguru import logger
@@ -13,7 +14,23 @@ from agentevolver.schema.task import TaskObjective
 
 
 class AdaptiveMixtureStrategy(MixtureStrategy):
-    """Mixture strategy with category-level weighted resampling for T-Patch."""
+    """Mixture strategy with category-level weighted resampling for T-Patch.
+
+    New knobs (all default to the legacy behavior so existing ablation rows
+    that instantiate this class with only the old kwargs are unaffected):
+
+      - ``stratified``: when True, allocates per-category quotas using a
+        largest-remainder split of ``count`` and samples **without**
+        replacement inside each category whenever the quota fits in the pool.
+        This avoids the "same hard task picked 4× in one epoch" failure mode
+        that the legacy ``rng.choices`` path exhibits under skewed weights,
+        which otherwise corrupts GRPO's per-prompt group baseline.
+      - ``stable_seed``: when True, the RNG is seeded once from ``seed`` at
+        construction time. The legacy path mixes ``seed + rebuild_count``
+        into the seed on every ``mix_data`` call, which makes mixture draws
+        drift across runs as a function of how often the T-Patch controller
+        accepts a patch - ruining cross-ablation reproducibility.
+    """
 
     def __init__(
         self,
@@ -25,6 +42,8 @@ class AdaptiveMixtureStrategy(MixtureStrategy):
         target_size: Optional[int] = None,
         replacement: bool = True,
         default_weight: float = 1.0,
+        stratified: bool = False,
+        stable_seed: bool = False,
     ):
         if synthetic_ratio < 0:
             raise ValueError("synthetic_ratio must be non-negative")
@@ -39,7 +58,12 @@ class AdaptiveMixtureStrategy(MixtureStrategy):
         self._target_size = target_size
         self._replacement = replacement
         self._default_weight = default_weight
+        self._stratified = stratified
+        self._stable_seed = stable_seed
         self._rebuild_count = 0
+        self._stable_rng: Optional[random.Random] = (
+            random.Random(seed) if stable_seed and seed is not None else None
+        )
 
     @property
     def need_synthetic(self) -> bool:
@@ -54,6 +78,8 @@ class AdaptiveMixtureStrategy(MixtureStrategy):
         logger.info(f"TOCF category weights updated: {self._category_weights}")
 
     def _rng(self):
+        if self._stable_rng is not None:
+            return self._stable_rng
         if self._seed is None:
             return random
         return random.Random(self._seed + self._rebuild_count)
@@ -61,12 +87,70 @@ class AdaptiveMixtureStrategy(MixtureStrategy):
     def _category(self, item: TaskObjective) -> str:
         return infer_task_category(item.task.task_id, item.task.env_type, item.task.metadata)
 
+    def _weight_for_category(self, category: str) -> float:
+        return max(0.0, float(self._category_weights.get(category, self._default_weight)))
+
     def _weight(self, item: TaskObjective) -> float:
-        return max(0.0, float(self._category_weights.get(self._category(item), self._default_weight)))
+        return self._weight_for_category(self._category(item))
+
+    def _stratified_sample(
+        self, items: Sequence[TaskObjective], count: int, rng
+    ) -> list[TaskObjective]:
+        """Largest-remainder quota allocation + within-category sampling.
+
+        Within-category sampling is **without replacement** unless the quota
+        exceeds the pool, in which case the full pool is taken and the
+        remainder is filled with replacement from the same pool.
+        """
+        if count <= 0 or not items:
+            return []
+
+        groups: dict[str, list[TaskObjective]] = defaultdict(list)
+        for it in items:
+            groups[self._category(it)].append(it)
+
+        cat_weights = {c: self._weight_for_category(c) for c in groups}
+        total_weight = sum(cat_weights.values())
+        if total_weight <= 0.0:
+            cat_weights = {c: 1.0 for c in groups}
+            total_weight = float(len(cat_weights))
+
+        raw_quotas = {c: count * cat_weights[c] / total_weight for c in groups}
+        quotas = {c: int(math.floor(q)) for c, q in raw_quotas.items()}
+        remainder = count - sum(quotas.values())
+        if remainder > 0:
+            order = sorted(
+                raw_quotas.keys(),
+                key=lambda c: raw_quotas[c] - quotas[c],
+                reverse=True,
+            )
+            for c in order[:remainder]:
+                quotas[c] += 1
+
+        selected: list[TaskObjective] = []
+        for category, quota in quotas.items():
+            if quota <= 0:
+                continue
+            pool = groups[category]
+            if not pool:
+                continue
+            if quota <= len(pool):
+                picks = rng.sample(pool, quota)
+            else:
+                # Quota exceeds unique pool size: take the whole pool first
+                # (each distinct task appears at least once) then fill the
+                # rest with replacement, which is the minimum amount of
+                # duplication consistent with the requested count.
+                picks = list(pool) + rng.choices(pool, k=quota - len(pool))
+            selected.extend(copy.deepcopy(p) for p in picks)
+        return selected
 
     def _weighted_sample(self, items: Sequence[TaskObjective], count: int, rng) -> list[TaskObjective]:
         if count <= 0 or not items:
             return []
+
+        if self._stratified:
+            return self._stratified_sample(items, count, rng)
 
         weights = [self._weight(item) for item in items]
         if sum(weights) <= 0:
@@ -112,7 +196,8 @@ class AdaptiveMixtureStrategy(MixtureStrategy):
         logger.info(
             "TOCF mixture rebuilt: "
             f"#original_seed={len(original_tasks)}, #synthetic_seed={len(synthetic_objectives)}, "
-            f"#mixed={len(mixed)}, distribution={dict(Counter(self._category(x) for x in mixed))}"
+            f"#mixed={len(mixed)}, stratified={self._stratified}, "
+            f"distribution={dict(Counter(self._category(x) for x in mixed))}"
         )
         return mixed
 
@@ -121,5 +206,6 @@ class AdaptiveMixtureStrategy(MixtureStrategy):
             "AdaptiveMixtureStrategy("
             f"use_original={self._use_original}, synthetic_ratio={self._synthetic_ratio}, "
             f"category_weights={self._category_weights}, shuffle={self._shuffle}, "
-            f"seed={self._seed}, target_size={self._target_size}, replacement={self._replacement})"
+            f"seed={self._seed}, target_size={self._target_size}, replacement={self._replacement}, "
+            f"stratified={self._stratified}, stable_seed={self._stable_seed})"
         )
