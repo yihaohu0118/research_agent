@@ -149,7 +149,6 @@ env_service:
     # cues on top of that baseline; see header for the rationale.
     tool_prompt_mode: t3rl_text
     tool_result_mode: plain_user
-    eval_policy: clean
 
 # ── Trainer ───────────────────────────────────────────────────────────────────
 trainer:

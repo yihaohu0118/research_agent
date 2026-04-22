@@ -99,9 +99,6 @@ env_service:
     # legacy: current AE <tool_call>{"name", "content"}</tool_call> wrapper.
     # plain_user: user-role observation text without a tool_call wrapper.
     tool_result_mode: plain_user
-    # clean: report/reward only trajectories with no invalid tool calls or tool errors.
-    # official: report the official BFCL eventual-success accuracy.
-    eval_policy: clean
 
 trainer:
   n_gpus_per_node: 4
