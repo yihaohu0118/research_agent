@@ -423,6 +423,14 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
         self.tocf_stats = TOCFStats(dump_dir=stats_dump_dir) if stats_enabled else None
         self.tocf_controller = TOCFController(tocf_cfg) if tocf_enabled else None
 
+        from agentevolver.module.tocf.epatch import ExperienceBank, epatch_enabled
+        if epatch_enabled(config):
+            se_cfg = (tocf_cfg.get("self_evolution", {}) or {}) if tocf_cfg else {}
+            max_per_cat = int(se_cfg.get("max_per_category", 5) or 5)
+            self.experience_bank = ExperienceBank(max_per_category=max_per_cat)
+        else:
+            self.experience_bank = None
+
         self._create_dataloader_from_manager(collate_fn, shuffle_trainset)  # ⭐ Create dataloader from the provided manager
 
 
@@ -1345,7 +1353,13 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                             task_exp_configs = self.exp_manager.get_complete_exp_configs(tasks, mode="sample")
                             assert len(task_exp_configs)==len(tasks), "{len(task_exp_configs)=}, {len(gen_batch)=}"
 
-                            # TODO enable tracing by jinli 0619
+                            # ==================== E-Patch: inject self-evolved experience ====================
+                            if self.experience_bank is not None:
+                                from agentevolver.module.tocf.epatch import apply_experience_injection
+                                for _task in tasks:
+                                    apply_experience_injection(_task, self.experience_bank, self.config, mode="sample")
+                            # ==================== End E-Patch ====================
+
                             print("=" * 10 + "start fit rollout" + "=" * 10)
                             trajectories = self.env_manager.rollout(tasks, task_exp_configs, mode="sample", epoch=f"train.{epoch}.{i}")  # ⭐ Generate trajectories using the environment manager
                             assert len(trajectories)>0, "{len(trajectories)=}?"
@@ -1353,6 +1367,13 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                             if self.tocf_stats is not None:
                                 self.tocf_stats.observe(tasks, trajectories, epoch, self.global_steps)
                                 metrics.update(self.tocf_stats.metrics())
+
+                            # ==================== E-Patch: ingest successful trajectories ====================
+                            if self.experience_bank is not None:
+                                from agentevolver.module.tocf.epatch import ingest_from_trajectories
+                                ep_metrics = ingest_from_trajectories(self.experience_bank, trajectories, self.config)
+                                metrics.update(ep_metrics)
+                            # ==================== End E-Patch ingest ====================
 
                             gen_batch_output = self.env_manager.to_dataproto(trajectories)
                             
