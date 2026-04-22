@@ -11,24 +11,33 @@
 #                                category reweighting.
 #
 # Design notes (what makes this F-Patch different from the legacy capped one):
-#   1. mode=t3rl.  Reward shape mirrors /Users/huyihao/Desktop/T3RL-main
-#      (t3rl/rollout/bfcl.py:res_to_sample + t3rl/envs/bfcl_gym.py). No cap,
-#      no partial-credit weight, no cap_decay. The previous cap of 0.7
-#      flattened GRPO advantages for top trajectories and was dominated by
-#      a hand-tuned scalar; T3RL shows that a direct progress signal is
-#      enough.
+#   1. mode=t3rl.  Reward shape inspired by /Users/huyihao/Desktop/T3RL-main
+#      (t3rl/rollout/bfcl.py:res_to_sample + t3rl/envs/bfcl_gym.py) but
+#      hardened against an abstention exploit we hit on Qwen2.5-7B with
+#      400 training samples (see (3)).
 #   2. progress_with_irrelevance.  The legacy ``bfcl_progress`` metric
 #      silently excludes GT-empty turns (irrelevance / miss_func reveal
 #      turns), so the correct behaviour — *not* calling a tool — produced
-#      zero gradient. The new metric, computed in
-#      env_service/environments/bfcl/multi_turn_progress.py, scores those
-#      turns as 1.0 when the model abstained and 0.0 when it attempted a
-#      tool call. This gives miss_func tasks a clean on-policy signal
-#      aligned with the eval metric, exactly matching T3RL's semantics.
-#   3. Full-pass safety net.  Binary accuracy is still authoritative: a
+#      zero gradient. The new metric (env_service/environments/bfcl/
+#      multi_turn_progress.py) scores those turns as 1.0 when the model
+#      abstained and 0.0 when it attempted a tool call, giving miss_func
+#      tasks a clean on-policy signal aligned with the eval metric.
+#   3. irrelevance_weight=0.5 (abstention guard).  Raw T3RL progress
+#      uses the same weight for every user turn.  On small splits that
+#      opens a degenerate local optimum where the policy abstains on
+#      *every* turn — it still collects (irrelevance_count / total_turns)
+#      of reward per rollout, which on miss_func is ~0.4, higher than
+#      an honest-but-failing rollout.  GRPO then pushes toward "call
+#      nothing" and we observed a step-100 collapse across all four
+#      categories (9% → 14.5% → 8.75%).  Down-weighting the irrelevance
+#      contribution to 0.5 keeps the gradient positive on correct
+#      abstention but makes partial-success rollouts strictly dominate
+#      abstention-only rollouts again.  See BfclDenseEnvGrader for the
+#      exact formula.
+#   4. Full-pass safety net.  Binary accuracy is still authoritative: a
 #      fully-correct trajectory always scores 1.0 even if the progress
-#      scorer disagrees (defensive, matches T3RL's final reward clamp).
-#   4. T-Patch OFF.  Category weights stay uniform with the stock BFCL
+#      scorer disagrees.
+#   5. T-Patch OFF.  Category weights stay uniform with the stock BFCL
 #      mixture so this row isolates F-Patch's contribution rather than
 #      stacking it on top of sampling changes.
 
@@ -225,11 +234,24 @@ tocf:
   query_suffix:
     enable: false
 
-  # F-Patch ON, T3RL-style uncapped progress-with-irrelevance reward.
+  # F-Patch ON, T3RL-style progress-with-irrelevance reward, hardened
+  # with an abstention guard (see grader docstring).
   feedback:
     dense_reward:
       enable: true
       mode: t3rl
+      # Abstention guard. Irrelevance-turn component is counted at
+      # ``w = 0.5`` in both numerator and denominator, so a trajectory
+      # that only abstains scores ~0.25 on miss_func (was ~0.40) and
+      # partial-success rollouts keep a strictly larger GRPO advantage.
+      # Set to 1.0 for raw T3RL; set to 0.0 to drop irrelevance turns
+      # entirely (equivalent to the legacy ``bfcl_progress`` metric).
+      irrelevance_weight: 0.5
+      # Harder version of the guard: zero the dense reward whenever no
+      # scorable turn passed. Off by default because it kills all-zero
+      # groups during very early training (no GRPO signal). Flip to
+      # true once the model reliably clears at least one scorable turn.
+      scorable_floor: false
       # Legacy knobs are no-ops in ``t3rl`` mode; kept for visual parity
       # with the ``capped`` branch of the grader.
       partial_credit_cap: 1.0
