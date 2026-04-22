@@ -138,7 +138,7 @@ env_service:
     enforce_available_tools: true
     tool_prompt_mode: t3rl_text
     tool_result_mode: plain_user
-    eval_policy: clean
+    eval_policy: official
 
 # ── Trainer ───────────────────────────────────────────────────────────────────
 trainer:
