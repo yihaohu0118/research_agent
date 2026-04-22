@@ -593,6 +593,11 @@ class EnvHandler:
                 completed=conversation_result.get("completed", False),
             )
             clean_accuracy = accuracy if diagnostics["clean"] else 0.0
+            moderate_clean = (
+                bool(conversation_result.get("completed", False))
+                and not diagnostics["has_tool_error"]
+            )
+            moderate_accuracy = accuracy if moderate_clean else 0.0
 
             # Per-user-turn outcome progress (primary dense reward signal).
             # We emit both a compact float used by the grader and a small info
@@ -634,6 +639,7 @@ class EnvHandler:
             result.update(
                 {
                     "clean_accuracy": clean_accuracy,
+                    "moderate_accuracy": moderate_accuracy,
                     "trajectory_clean": diagnostics["clean"],
                     "trajectory_has_invalid_tool_call": diagnostics[
                         "has_invalid_tool_call"

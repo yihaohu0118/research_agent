@@ -487,9 +487,12 @@ class BfclEnv(BaseEnv):
         eval_policy = self.params.get("eval_policy", "clean")
         if eval_policy == "clean":
             result = {**result, "accuracy": result.get("clean_accuracy", 0.0)}
+        elif eval_policy == "moderate":
+            result = {**result, "accuracy": result.get("moderate_accuracy", 0.0)}
         elif eval_policy != "official":
             raise ValueError(
-                f"Unsupported BFCL eval_policy={eval_policy!r}; use 'clean' or 'official'."
+                f"Unsupported BFCL eval_policy={eval_policy!r}; "
+                "use 'clean', 'moderate', or 'official'."
             )
         return result.get("accuracy", 0.0) if sparse else result
 
