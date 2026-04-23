@@ -431,6 +431,23 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
         else:
             self.experience_bank = None
 
+        from agentevolver.module.tocf.spatch import (
+            StrategyBandit,
+            _resolve_strategy_library,
+            spatch_enabled,
+        )
+        if spatch_enabled(config):
+            sp_cfg = (tocf_cfg.get("strategy", {}) or {}) if tocf_cfg else {}
+            prior_alpha = float(sp_cfg.get("prior_alpha", 1.0) or 1.0)
+            prior_beta = float(sp_cfg.get("prior_beta", 1.0) or 1.0)
+            self.strategy_bandit = StrategyBandit(
+                library=_resolve_strategy_library(config),
+                prior_alpha=prior_alpha,
+                prior_beta=prior_beta,
+            )
+        else:
+            self.strategy_bandit = None
+
         self._create_dataloader_from_manager(collate_fn, shuffle_trainset)  # ⭐ Create dataloader from the provided manager
 
 
@@ -1360,6 +1377,13 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                                     apply_experience_injection(_task, self.experience_bank, self.config, mode="sample")
                             # ==================== End E-Patch ====================
 
+                            # ==================== S-Patch: inject bandit-selected strategy ====================
+                            if self.strategy_bandit is not None:
+                                from agentevolver.module.tocf.spatch import apply_strategy_injection
+                                for _task in tasks:
+                                    apply_strategy_injection(_task, self.strategy_bandit, self.config, mode="sample")
+                            # ==================== End S-Patch ====================
+
                             print("=" * 10 + "start fit rollout" + "=" * 10)
                             trajectories = self.env_manager.rollout(tasks, task_exp_configs, mode="sample", epoch=f"train.{epoch}.{i}")  # ⭐ Generate trajectories using the environment manager
                             assert len(trajectories)>0, "{len(trajectories)=}?"
@@ -1374,6 +1398,15 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                                 ep_metrics = ingest_from_trajectories(self.experience_bank, trajectories, self.config)
                                 metrics.update(ep_metrics)
                             # ==================== End E-Patch ingest ====================
+
+                            # ==================== S-Patch: update strategy bandit ====================
+                            if self.strategy_bandit is not None:
+                                from agentevolver.module.tocf.spatch import update_bandit_from_trajectories
+                                sp_metrics = update_bandit_from_trajectories(
+                                    self.strategy_bandit, trajectories, self.config
+                                )
+                                metrics.update(sp_metrics)
+                            # ==================== End S-Patch update ====================
 
                             gen_batch_output = self.env_manager.to_dataproto(trajectories)
                             
