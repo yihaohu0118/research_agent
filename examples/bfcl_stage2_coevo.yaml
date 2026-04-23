@@ -1,0 +1,320 @@
+# Stage 2 of the two-stage curriculum: resume from the Stage-1 best
+# checkpoint and train on the FULL 4-category split with the full
+# co-evolution stack (GRPO + A-Patch + E-Patch + S-Patch).
+#
+# Pipeline recap:
+#
+#   Stage 1 (bfcl_stage1_grpo.yaml, already run)
+#     - vanilla GRPO
+#     - train split: data/bfcl_train_base_missfunc_200.parquet
+#                    (only base + miss_func)
+#     - val split:   data/bfcl_test_400.parquet (full 4 categories)
+#     - total_epochs: 5 / 10
+#     - save_best_checkpoint: true
+#       => checkpoints/bfcl_stage1_grpo/bfcl_stage1_grpo_base_missfunc/best
+#
+#   Stage 2 (THIS FILE)
+#     - resume from Stage-1 best
+#     - train split expanded to data/bfcl_train_400.parquet
+#       (all 4 categories incl. miss_param + long_context that Stage 1
+#        never trained on)
+#     - val split identical to Stage 1, so the comparison is apples-to-
+#       apples at the same val set
+#     - GRPO + A + E + S (same combo as bfcl_tocf_coevo.yaml for
+#       from-scratch vs curriculum comparison)
+#
+# What we want to prove with this file (three testable claims):
+#
+#   H1  Curriculum > from-scratch: stage2_coevo's final overall ≥
+#       coevo_from_scratch's final overall.
+#   H2  Unseen categories benefit most: miss_param and long_context
+#       gains at stage-2 step 10–20 should be larger than the Stage-1
+#       baseline delta over the same categories.
+#   H3  A/E/S still add value on a warm policy: stage2_coevo should
+#       exceed a hypothetical stage2_vanilla_grpo row (same resume,
+#       but with all tocf patches off).  We include such a row in the
+#       follow-up if H3 is the sole open question after this run.
+#
+# Operational notes.
+#   - resume_mode: "resume_path" forces the trainer to load
+#     trainer.resume_from_path explicitly.  Do NOT set resume_mode:
+#     auto here — "auto" would try to resume from THIS experiment's
+#     own checkpoint dir, which doesn't exist yet.
+#
+#   - resume_from_path MUST contain the literal substring
+#     "global_step_", because verl's RayPPOTrainer._load_checkpoint
+#     parses the global step via
+#         self.global_steps = int(path.split("global_step_")[-1])
+#     which means pointing at the Stage-1 "best" symlink does NOT work
+#     (symlinks are strings too; "best" has no "global_step_" in it).
+#     Point directly at the step directory instead.
+#
+#     How to find the correct path after Stage 1 finishes:
+#         cat checkpoints/bfcl_stage1_grpo/bfcl_stage1_grpo_base_missfunc/best_checkpoint_path.txt
+#     will print something like
+#         checkpoints/bfcl_stage1_grpo/bfcl_stage1_grpo_base_missfunc/global_step_50
+#     — paste that into resume_from_path below (or override on the
+#     command line with `+trainer.resume_from_path=...`).
+#
+#   - actor_rollout_ref.model.path stays as the original Qwen path.
+#     verl's resume machinery loads weights from resume_from_path and
+#     only uses model.path for tokenizer/config bootstrap. Changing
+#     model.path to the checkpoint dir is unnecessary and can break
+#     tokenizer loading if the checkpoint dir only holds raw tensors.
+#
+#   - test_freq: 5 (twice as often as Stage 1) to get finer-grained
+#     early-stage curves where the curriculum effect should be most
+#     visible.
+
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
+defaults:
+  - ppo_trainer
+  - agentevolver
+  - _self_
+
+# ── Data: full 4 categories ───────────────────────────────────────────────────
+data:
+  train_files: data/bfcl_train_400.parquet
+  val_files: data/bfcl_test_400.parquet
+  train_batch_size: 16
+  max_prompt_length: 8192
+  max_response_length: 4096
+  return_raw_chat: true
+  filter_overlong_prompts: true
+  truncation: "error"
+  val_batch_size: 256
+  val_type: "val"
+
+# ── Algorithm: standard GRPO ──────────────────────────────────────────────────
+algorithm:
+  gamma: 1.0
+  lam: 1.0
+  adv_estimator: grpo
+  use_kl_in_reward: false
+  kl_penalty: kl
+  kl_ctrl:
+    type: fixed
+    kl_coef: 0.0
+
+# ── Actor / rollout / ref ─────────────────────────────────────────────────────
+actor_rollout_ref:
+  hybrid_engine: true
+  model:
+    # Tokenizer / config still come from the HF repo; weights come
+    # from trainer.resume_from_path below.
+    path: Qwen/Qwen2.5-7B-Instruct
+    use_remove_padding: true
+    enable_gradient_checkpointing: true
+  rollout:
+    name: vllm
+    mode: async
+    temperature: 1.0
+    n: 8
+    prompt_length: ${data.max_prompt_length}
+    response_length: ${data.max_response_length}
+    max_model_len: 16384
+    gpu_memory_utilization: 0.6
+    tensor_model_parallel_size: 1
+    log_prob_micro_batch_size_per_gpu: 1
+    log_prob_max_token_len_per_gpu: 16384
+    val_kwargs:
+      n: 1
+      temperature: 0
+    multi_turn:
+      enable: true
+      format: llama3_json
+      max_steps: 20
+      completion_callback: agentevolver.module.trainer.simple_completion_callback.SimpleCompletionCallback
+      tool_config_path: ""
+    max_env_worker: 32
+    sparse: true
+  actor:
+    optim:
+      # Slightly lower LR than Stage 1 (1e-6 -> 5e-7) because the
+      # policy is already partially converged; keep updates small so
+      # we don't erase the base+miss_func competence.
+      lr: 5e-7
+    use_kl_loss: true
+    kl_loss_coef: 0.001
+    kl_loss_type: low_var_kl
+    clip_ratio: 0.2
+    clip_ratio_low: 0.2
+    clip_ratio_high: 0.2
+    off_cliprange_high: 1.0
+    clip_ratio_c: 10.0
+    grad_clip: 1.0
+    entropy_coeff: 0
+    ppo_micro_batch_size_per_gpu: 1
+    ppo_mini_batch_size: 8
+    ppo_max_token_len_per_gpu: 16384
+    loss_agg_mode: token-mean
+    fsdp_config:
+      param_offload: false
+      optimizer_offload: false
+  ref:
+    log_prob_micro_batch_size_per_gpu: 1
+    log_prob_max_token_len_per_gpu: 16384
+    fsdp_config:
+      param_offload: true
+
+critic:
+  grad_clip: 1.0
+  cliprange_value: 0.5
+  ppo_max_token_len_per_gpu: 16384
+  forward_max_token_len_per_gpu: 16384
+
+# ── Environment ───────────────────────────────────────────────────────────────
+env_service:
+  env_type: "bfcl"
+  env_url: "http://127.0.0.1:8082"
+  env_feedin_preference: code
+  bfcl:
+    strict_tool_parser: true
+    enforce_available_tools: true
+    tool_prompt_mode: t3rl_text
+    tool_result_mode: plain_user
+
+# ── Trainer ───────────────────────────────────────────────────────────────────
+trainer:
+  n_gpus_per_node: 4
+  nnodes: 1
+  critic_warmup: 0
+  logger: ["console"]
+  project_name: bfcl_stage2_coevo
+  experiment_name: bfcl_stage2_coevo_400x400
+
+  # Resume from Stage-1 best checkpoint.
+  #
+  # IMPORTANT: the path string MUST contain "global_step_" (verl parses
+  # the step number from it via split("global_step_")[-1]).  That rules
+  # out pointing at the ``best`` symlink.  After Stage 1 finishes, read
+  # the real step from:
+  #     cat checkpoints/bfcl_stage1_grpo/bfcl_stage1_grpo_base_missfunc/best_checkpoint_path.txt
+  # and update the path below, OR override on the command line, e.g.
+  #     +trainer.resume_from_path=checkpoints/bfcl_stage1_grpo/bfcl_stage1_grpo_base_missfunc/global_step_50
+  #
+  # The value below is the observed best step from our last Stage-1
+  # run (step 50). Update if your Stage-1 run converges elsewhere.
+  resume_mode: "resume_path"
+  resume_from_path: "checkpoints/bfcl_stage1_grpo/bfcl_stage1_grpo_base_missfunc/global_step_50"
+
+  save_freq: 0
+  save_best_checkpoint: false
+  keep_only_best_checkpoint: true
+  save_limit: 0
+  # Twice as often as Stage 1 — the curriculum effect should be
+  # sharpest in the first ~30 steps after resume.
+  test_freq: 5
+  total_epochs: 10
+  val_before_train: true
+  val_only: false
+
+# ── AgentEvolver task manager ─────────────────────────────────────────────────
+task_manager:
+  n: 0
+  train_data_path: tasks_explored.train.json
+  val_data_path: tasks_explored.val.json
+  llm_client: qwen-plus
+  env_profile: cookbook/env_profiles/bfcl.json
+  bs: ${data.train_batch_size}
+  num_explore_threads: ${thread_pool.max_workers}
+  mixture:
+    use_original_tasks: true
+    synthetic_data_ratio: 0.0
+    shuffle: true
+  grader:
+    # Dense grader so A-Patch gets per-turn failure tags (same
+    # reason as bfcl_tocf_coevo.yaml).
+    original_grader: bfcl_dense_env
+    synthetic_grader: llm-binary-gt-no_constraint
+  strategy: random
+  strategy_args:
+    max_explore_step: 30
+    max_llm_retries: 6
+    env_url: ${env_service.env_url}
+    exploration_llm_temperature: 1.0
+    exploration_llm_top_p: 1.0
+    exploration_llm_top_k: 100
+
+bfcl_dense_env_grader:
+  mode: capped
+  partial_credit_cap: 1.0
+  partial_credit_weight: 1.0
+  cap_decay: false
+  min_cap: 0.0
+
+# ── Experience management OFF ─────────────────────────────────────────────────
+exp_manager:
+  val_rollout_mode: "woexp"
+  train_rollout_mode: "woexp"
+  rollout_ratio: 0.0
+  train_sample_mode: "alldiscard"
+  train_sample_keepratio: 1.0
+  experience_template: "\n\nSome Related Experience to help you to complete the task:<EXP>{}</EXP>\n\n"
+  init_exp_before_training: false
+  init_exp_only: false
+  summary_batch_size: 8
+  reme:
+    base_url: "http://127.0.0.1:8001"
+    workspace_id: "default"
+    enable_summarizer: false
+    enable_context_generator: false
+    retrieve_top_k: 3
+    updated_freq: 0
+
+attribution_driven_credit_assignment:
+  enable: false
+
+# ── TOCF: same A + E + S combo as bfcl_tocf_coevo.yaml ────────────────────────
+# Kept identical on purpose: (stage1 → stage2_coevo) vs
+# (from-scratch coevo) is the exact ablation we want to measure.
+tocf:
+  enable: true
+  stats:
+    enable: true
+
+  task_distribution:
+    enable: false
+
+  query_suffix:
+    enable: false
+    apply_to_validation: false
+
+  feedback:
+    dense_reward:
+      enable: false
+
+  self_evolution:
+    enable: true
+    max_per_category: 5
+    inject_prob: 0.5
+    critique_prob: 0.5
+    apply_to_validation: false
+
+  advantage:
+    apatch:
+      enable: true
+      min_scale: 0.5
+      max_scale: 2.0
+      apply_to: all
+      metric_prefix: tocf/apatch
+      tag_weights:
+        spurious_tool_call: 2.0
+        correct_abstention: 1.8
+        empty_turn_model_response: 1.5
+        state_mismatch: 1.0
+        response_mismatch: 0.9
+        instance_mismatch: 0.6
+        pass: 1.0
+
+  strategy:
+    enable: true
+    inject_prob: 0.5
+    apply_to_validation: false
+    prior_alpha: 1.0
+    prior_beta: 1.0
+    template: "\n\n[Strategy] {text}\n"
