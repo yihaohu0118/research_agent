@@ -31,10 +31,13 @@ Config path (all under ``tocf.self_evolution``):
 """
 from __future__ import annotations
 
+import json
+import os
 import random
-from collections import defaultdict, deque
-from typing import Any, Dict, List, Optional, Tuple
+from collections import defaultdict
+from typing import Any, Dict, List, Optional
 
+from agentevolver.module.tocf.state import TOCFCapabilityState, dominant_failure_tag
 from agentevolver.schema.task import Task
 
 
@@ -126,46 +129,158 @@ def _extract_critique_from_messages(messages: List[dict]) -> str:
 
 
 class ExperienceBank:
-    """Per-category ring buffer for success demos AND failure critiques."""
+    """Ranked, persistent per-category and per-tag memory bank."""
 
-    def __init__(self, max_per_category: int = 5):
-        self._success: Dict[str, deque] = defaultdict(lambda: deque(maxlen=max_per_category))
-        self._critique: Dict[str, deque] = defaultdict(lambda: deque(maxlen=max_per_category))
+    def __init__(self, max_per_category: int = 5, path: str | None = None):
+        self._success: Dict[str, list[dict[str, Any]]] = defaultdict(list)
+        self._critique: Dict[str, list[dict[str, Any]]] = defaultdict(list)
         self._max = max_per_category
+        self.path = path
         self._ingest_count = 0
         self._critique_count = 0
+        if path:
+            self.load(path)
 
-    def ingest(self, category: str, demo: str) -> None:
+    def _key(self, category: str, tag: str | None = None) -> str:
+        return f"{category}::{tag or 'unknown'}"
+
+    def _entry(
+        self,
+        category: str,
+        text: str,
+        *,
+        tag: str | None = None,
+        reward: float = 0.0,
+        task_id: str | None = None,
+        step: int | None = None,
+        quality: float | None = None,
+    ) -> dict[str, Any]:
+        score = float(quality if quality is not None else reward)
+        return {
+            "category": str(category),
+            "tag": str(tag or "unknown"),
+            "text": str(text),
+            "reward": float(reward),
+            "quality": score,
+            "task_id": str(task_id or ""),
+            "created_step": step,
+        }
+
+    def _trim(self, bucket: list[dict[str, Any]]) -> None:
+        bucket.sort(
+            key=lambda item: (
+                float(item.get("quality", 0.0) or 0.0),
+                int(item.get("created_step") or -1),
+            ),
+            reverse=True,
+        )
+        del bucket[self._max :]
+
+    def ingest(
+        self,
+        category: str,
+        demo: str,
+        *,
+        tag: str | None = None,
+        reward: float = 1.0,
+        task_id: str | None = None,
+        step: int | None = None,
+        quality: float | None = None,
+    ) -> None:
         if not demo:
             return
-        self._success[category].append(demo)
+        entry = self._entry(
+            category,
+            demo,
+            tag=tag,
+            reward=reward,
+            task_id=task_id,
+            step=step,
+            quality=quality,
+        )
+        bucket = self._success[self._key(category, tag)]
+        bucket.append(entry)
+        self._trim(bucket)
         self._ingest_count += 1
 
-    def ingest_critique(self, category: str, critique: str) -> None:
+    def ingest_critique(
+        self,
+        category: str,
+        critique: str,
+        *,
+        tag: str | None = None,
+        reward: float = 0.0,
+        task_id: str | None = None,
+        step: int | None = None,
+        quality: float | None = None,
+    ) -> None:
         if not critique:
             return
-        self._critique[category].append(critique)
+        entry = self._entry(
+            category,
+            critique,
+            tag=tag,
+            reward=reward,
+            task_id=task_id,
+            step=step,
+            quality=quality if quality is not None else 1.0 - float(reward),
+        )
+        bucket = self._critique[self._key(category, tag)]
+        bucket.append(entry)
+        self._trim(bucket)
         self._critique_count += 1
 
-    def sample(self, category: str) -> Optional[str]:
-        buf = self._success.get(category)
-        if not buf:
-            return None
-        return random.choice(buf)
+    def _candidates(
+        self,
+        source: Dict[str, list[dict[str, Any]]],
+        category: str,
+        tag: str | None,
+    ) -> list[dict[str, Any]]:
+        keys = [self._key(category, tag)] if tag else []
+        keys.append(self._key(category, "unknown"))
+        exact = []
+        for key in keys:
+            exact.extend(source.get(key, []))
+        if exact:
+            return exact
+        fallback: list[dict[str, Any]] = []
+        prefix = f"{category}::"
+        for key, entries in source.items():
+            if key.startswith(prefix):
+                fallback.extend(entries)
+        return fallback
 
-    def sample_critique(self, category: str) -> Optional[str]:
-        buf = self._critique.get(category)
-        if not buf:
+    def sample(self, category: str, tag: str | None = None) -> Optional[str]:
+        candidates = self._candidates(self._success, category, tag)
+        if not candidates:
             return None
-        return random.choice(buf)
+        ranked = sorted(candidates, key=lambda item: float(item.get("quality", 0.0)), reverse=True)
+        pool = ranked[: max(1, min(len(ranked), self._max))]
+        return str(random.choice(pool).get("text") or "")
+
+    def sample_critique(self, category: str, tag: str | None = None) -> Optional[str]:
+        candidates = self._candidates(self._critique, category, tag)
+        if not candidates:
+            return None
+        ranked = sorted(candidates, key=lambda item: float(item.get("quality", 0.0)), reverse=True)
+        pool = ranked[: max(1, min(len(ranked), self._max))]
+        return str(random.choice(pool).get("text") or "")
 
     @property
     def stats(self) -> Dict[str, int]:
-        return {cat: len(buf) for cat, buf in self._success.items()}
+        counts: Dict[str, int] = defaultdict(int)
+        for entries in self._success.values():
+            for entry in entries:
+                counts[str(entry.get("category") or "unknown")] += 1
+        return dict(counts)
 
     @property
     def critique_stats(self) -> Dict[str, int]:
-        return {cat: len(buf) for cat, buf in self._critique.items()}
+        counts: Dict[str, int] = defaultdict(int)
+        for entries in self._critique.values():
+            for entry in entries:
+                counts[str(entry.get("category") or "unknown")] += 1
+        return dict(counts)
 
     @property
     def total_ingested(self) -> int:
@@ -178,9 +293,42 @@ class ExperienceBank:
     @property
     def total_stored(self) -> int:
         return (
-            sum(len(buf) for buf in self._success.values())
-            + sum(len(buf) for buf in self._critique.values())
+            sum(len(entries) for entries in self._success.values())
+            + sum(len(entries) for entries in self._critique.values())
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "success": {key: list(entries) for key, entries in self._success.items()},
+            "critique": {key: list(entries) for key, entries in self._critique.items()},
+            "max_per_category": self._max,
+            "ingest_count": self._ingest_count,
+            "critique_count": self._critique_count,
+        }
+
+    def load(self, path: str | None = None) -> None:
+        target = path or self.path
+        if not target or not os.path.exists(target):
+            return
+        try:
+            with open(target, "r", encoding="utf-8") as handle:
+                raw = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            return
+        self._success = defaultdict(list, {str(k): list(v) for k, v in dict(raw.get("success") or {}).items()})
+        self._critique = defaultdict(list, {str(k): list(v) for k, v in dict(raw.get("critique") or {}).items()})
+        stored_success = sum(len(entries) for entries in self._success.values())
+        stored_critique = sum(len(entries) for entries in self._critique.values())
+        self._ingest_count = int(raw.get("ingest_count", stored_success) or stored_success)
+        self._critique_count = int(raw.get("critique_count", stored_critique) or stored_critique)
+
+    def save(self, path: str | None = None) -> None:
+        target = path or self.path
+        if not target:
+            return
+        os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+        with open(target, "w", encoding="utf-8") as handle:
+            json.dump(self.to_dict(), handle, ensure_ascii=False, indent=2)
 
 
 def extract_tool_call_demo(messages: List[dict]) -> str:
@@ -251,6 +399,7 @@ def apply_experience_injection(
     bank: ExperienceBank,
     config: Any,
     mode: str | None = None,
+    capability_state: TOCFCapabilityState | None = None,
 ) -> bool:
     """Inject self-evolved experience (success demo + optional failure critique).
 
@@ -280,7 +429,12 @@ def apply_experience_injection(
     if not category:
         return False
 
-    demo = bank.sample(category)
+    tag = None
+    if capability_state is not None and task.task_id:
+        task_state = capability_state.tasks.get(str(task.task_id)) or {}
+        tag = task_state.get("last_tag")
+
+    demo = bank.sample(category, tag=tag)
     if not demo:
         return False
 
@@ -293,7 +447,7 @@ def apply_experience_injection(
     critique_prob = float(_cfg_get(se_cfg, "critique_prob", 0.5) or 0.5)
     critique_text = ""
     if random.random() < critique_prob:
-        critique = bank.sample_critique(category)
+        critique = bank.sample_critique(category, tag=tag)
         if critique:
             crit_tmpl = str(
                 _cfg_get(se_cfg, "critique_template", _DEFAULT_CRITIQUE_TEMPLATE)
@@ -305,6 +459,7 @@ def apply_experience_injection(
     metadata.setdefault("tocf", {})
     metadata["tocf"]["self_evolution_injected"] = True
     metadata["tocf"]["self_critique_injected"] = bool(critique_text)
+    metadata["tocf"]["self_evolution_tag"] = tag
     task.metadata = metadata
 
     task.query = f"{task.query}{experience_text}{critique_text}"
@@ -315,6 +470,7 @@ def ingest_from_trajectories(
     bank: ExperienceBank,
     trajectories: list,
     config: Any,
+    global_step: int | None = None,
 ) -> Dict[str, float]:
     """Ingest both success demos and failure critiques from trajectories.
 
@@ -342,17 +498,41 @@ def ingest_from_trajectories(
             continue
 
         success = getattr(traj, "success", False)
+        task_id = meta.get("task_id") or getattr(traj, "data_id", "")
+        reward = float(getattr(getattr(traj, "reward", None), "outcome", 0.0) or 0.0)
+        reward_meta = (
+            getattr(getattr(traj, "reward", None), "metadata", None) or {}
+        )
+        progress_info = reward_meta.get("bfcl_dense_progress_info", {}) or {}
+        failure_tags = list(progress_info.get("failure_tags") or [])
+        tag = dominant_failure_tag(failure_tags)
 
         if success:
             demo = extract_tool_call_demo(messages)
             if demo:
-                bank.ingest(category, demo)
+                bank.ingest(
+                    category,
+                    demo,
+                    tag=tag,
+                    reward=reward,
+                    task_id=task_id,
+                    step=global_step,
+                )
                 ingested_success += 1
         else:
             critique = _extract_critique_from_messages(messages)
             if critique:
-                bank.ingest_critique(category, critique)
+                bank.ingest_critique(
+                    category,
+                    critique,
+                    tag=tag,
+                    reward=reward,
+                    task_id=task_id,
+                    step=global_step,
+                )
                 ingested_critique += 1
+
+    bank.save()
 
     return {
         "tocf/epatch/ingested_success": float(ingested_success),

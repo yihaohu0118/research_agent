@@ -2,6 +2,7 @@ import json
 from typing import Optional, Sequence, Tuple
 
 from agentevolver.module.task_manager.env_profiles import EnvProfile
+from agentevolver.module.tocf.coevo import coevo_guidance_for_task
 from agentevolver.schema.task import Task, TaskObjective
 from agentevolver.schema.trajectory import Trajectory
 
@@ -114,6 +115,7 @@ def get_task_summarize_prompt(
     trajectories: Sequence[Trajectory],
     old_objectives: Sequence[TaskObjective],
     profile: EnvProfile | None,
+    seed_task: Task | None = None,
 ) -> tuple[str, str]:
     x = ""
     idx = 0
@@ -137,6 +139,7 @@ def get_task_summarize_prompt(
         idx += 1
 
     objectives: list[str] = [x.objective for x in old_objectives if x.objective is not None]
+    targeted_guidance = coevo_guidance_for_task(seed_task)
 
     user_prompt = f"""Please analyze the following agent interaction sequence and abstract specific tasks from it:
 
@@ -153,6 +156,8 @@ Please avoid repeating these objectives.
 
 {profile.get_task_preference_instruction() if profile is not None else "Please follow the instructions to generate tasks."}
 
+{targeted_guidance}
+
 # Now Start
 
 Please identify the specific tasks the agent is attempting to complete in these interactions, and abstract them into clear task descriptions and queries following the specified format.
@@ -162,8 +167,6 @@ Please identify the specific tasks the agent is attempting to complete in these 
 
 
 def parse_tasks_from_response(task: Task, response: str) -> list[TaskObjective]:
-    task = task.copy()
-
     tasks: list[TaskObjective] = []
     try:
         import re
@@ -179,10 +182,11 @@ def parse_tasks_from_response(task: Task, response: str) -> list[TaskObjective]:
                 or "action_sequence" not in t
             ):
                 continue
-            task.query = t["query"]
-            task.open_query = True
+            current_task = task.copy(deep=True)
+            current_task.query = t["query"]
+            current_task.open_query = True
             x=TaskObjective(
-                task=task,
+                task=current_task,
                 confidence=t["confidence"],
                 reward=None,
             )

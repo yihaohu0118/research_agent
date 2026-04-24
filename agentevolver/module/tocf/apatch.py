@@ -58,6 +58,8 @@ from typing import Any, Dict, List, Tuple
 
 import torch
 
+from agentevolver.module.tocf.state import TOCFCapabilityState
+
 _DEFAULT_TAG_WEIGHTS: Dict[str, float] = {
     # ── actionable, high-signal ──────────────────────────────────────────────
     # spurious_tool_call: miss_func failure mode. The model called tools on an
@@ -120,6 +122,13 @@ def _tag_weight(cfg_tag_weights: Any, tag: str) -> float:
     return float(getattr(cfg_tag_weights, tag, default))
 
 
+def _resolved_tag_weights(cfg_tag_weights: Any) -> Dict[str, float]:
+    tags = set(_DEFAULT_TAG_WEIGHTS)
+    if isinstance(cfg_tag_weights, dict):
+        tags.update(str(k) for k in cfg_tag_weights)
+    return {tag: _tag_weight(cfg_tag_weights, tag) for tag in tags}
+
+
 def _trajectory_scale(
     failure_tags: List[str],
     cfg_tag_weights: Any,
@@ -145,6 +154,8 @@ def apply_apatch_advantage_weighting(
     batch: Any,
     config: Any,
     env_type: str | None = None,
+    capability_state: TOCFCapabilityState | None = None,
+    global_step: int | None = None,
 ) -> Tuple[Any, Dict[str, float]]:
     """Apply A-Patch tag-aware advantage scaling in-place on the batch.
 
@@ -168,6 +179,27 @@ def apply_apatch_advantage_weighting(
     apply_to = str(_cfg_get(cfg, "apply_to", "all") or "all").lower()
     prefix = str(_cfg_get(cfg, "metric_prefix", "tocf/apatch") or "tocf/apatch")
     cfg_tag_weights = _cfg_get(cfg, "tag_weights", None)
+    warmup_steps = int(_cfg_get(cfg, "warmup_steps", 0) or 0)
+
+    if global_step is not None and global_step < warmup_steps:
+        return batch, {
+            f"{prefix}/enabled": 1.0,
+            f"{prefix}/warmup_skipped": 1.0,
+            f"{prefix}/scaled_count": 0.0,
+        }
+
+    active_tag_weights = _resolved_tag_weights(cfg_tag_weights)
+    dynamic_cfg = _cfg_get(cfg, "dynamic", {}) or {}
+    dynamic_enabled = bool(_cfg_get(dynamic_cfg, "enable", capability_state is not None))
+    if dynamic_enabled and capability_state is not None:
+        active_tag_weights = capability_state.update_dynamic_tag_weights(
+            active_tag_weights,
+            min_scale=min_scale,
+            max_scale=max_scale,
+            ema_beta=float(_cfg_get(dynamic_cfg, "ema_beta", 0.25) or 0.25),
+            prevalence_alpha=float(_cfg_get(dynamic_cfg, "prevalence_alpha", 1.0) or 1.0),
+            confidence_samples=int(_cfg_get(dynamic_cfg, "confidence_samples", 32) or 32),
+        )
 
     extras = batch.non_tensor_batch.get("extras", None)
     if extras is None:
@@ -180,6 +212,7 @@ def apply_apatch_advantage_weighting(
     scaled_count = 0
     scale_sum = 0.0
     tag_count_total: Dict[str, int] = {}
+    missing_tag_count = 0
 
     for idx in range(n_samples):
         extra = extras[idx] if idx < len(extras) else {}
@@ -187,9 +220,10 @@ def apply_apatch_advantage_weighting(
             continue
         failure_tags: List[str] = extra.get("bfcl_failure_tags") or []
         if not failure_tags:
+            missing_tag_count += 1
             continue
 
-        scale = _trajectory_scale(failure_tags, cfg_tag_weights, min_scale, max_scale)
+        scale = _trajectory_scale(failure_tags, active_tag_weights, min_scale, max_scale)
         scales[idx] = scale
         scaled_count += 1
         scale_sum += scale
@@ -210,10 +244,14 @@ def apply_apatch_advantage_weighting(
     metrics: Dict[str, float] = {
         f"{prefix}/enabled": 1.0,
         f"{prefix}/scaled_count": float(scaled_count),
+        f"{prefix}/missing_tag_count": float(missing_tag_count),
         f"{prefix}/mean_scale": scale_sum / scaled_count if scaled_count else 1.0,
+        f"{prefix}/dynamic_enabled": 1.0 if dynamic_enabled and capability_state is not None else 0.0,
     }
     total_tags = sum(tag_count_total.values())
     for tag, cnt in tag_count_total.items():
         metrics[f"{prefix}/tag_frac/{tag}"] = float(cnt) / float(total_tags) if total_tags else 0.0
+    for tag, weight in active_tag_weights.items():
+        metrics[f"{prefix}/tag_weight/{tag}"] = float(weight)
 
     return batch, metrics

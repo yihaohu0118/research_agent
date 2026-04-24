@@ -53,6 +53,7 @@ class AdaptiveMixtureStrategy(MixtureStrategy):
         self._use_original = use_original
         self._synthetic_ratio = synthetic_ratio
         self._category_weights = dict(category_weights or {})
+        self._task_weights: dict[str, float] = {}
         self._shuffle = shuffle
         self._seed = seed
         self._target_size = target_size
@@ -77,6 +78,10 @@ class AdaptiveMixtureStrategy(MixtureStrategy):
         self._category_weights = {str(k): max(0.0, float(v)) for k, v in dict(weights).items()}
         logger.info(f"TOCF category weights updated: {self._category_weights}")
 
+    def set_task_weights(self, weights: dict[str, float]):
+        self._task_weights = {str(k): max(0.0, float(v)) for k, v in dict(weights).items()}
+        logger.info(f"TOCF task weights updated: #tasks={len(self._task_weights)}")
+
     def _rng(self):
         if self._stable_rng is not None:
             return self._stable_rng
@@ -87,11 +92,35 @@ class AdaptiveMixtureStrategy(MixtureStrategy):
     def _category(self, item: TaskObjective) -> str:
         return infer_task_category(item.task.task_id, item.task.env_type, item.task.metadata)
 
+    def _task_id(self, item: TaskObjective) -> str:
+        return str(item.task.task_id or "")
+
     def _weight_for_category(self, category: str) -> float:
         return max(0.0, float(self._category_weights.get(category, self._default_weight)))
 
+    def _weight_for_task(self, task_id: str) -> float:
+        return max(0.0, float(self._task_weights.get(task_id, 1.0)))
+
     def _weight(self, item: TaskObjective) -> float:
-        return self._weight_for_category(self._category(item))
+        return self._weight_for_category(self._category(item)) * self._weight_for_task(self._task_id(item))
+
+    def _weighted_without_replacement(
+        self,
+        pool: Sequence[TaskObjective],
+        count: int,
+        rng,
+    ) -> list[TaskObjective]:
+        remaining = list(pool)
+        selected: list[TaskObjective] = []
+        for _ in range(min(count, len(remaining))):
+            weights = [self._weight(item) for item in remaining]
+            if sum(weights) <= 0.0:
+                weights = [1.0 for _ in remaining]
+            picked = rng.choices(range(len(remaining)), weights=weights, k=1)[0]
+            selected.append(remaining.pop(picked))
+            if not remaining:
+                break
+        return selected
 
     def _stratified_sample(
         self, items: Sequence[TaskObjective], count: int, rng
@@ -135,13 +164,16 @@ class AdaptiveMixtureStrategy(MixtureStrategy):
             if not pool:
                 continue
             if quota <= len(pool):
-                picks = rng.sample(pool, quota)
+                picks = self._weighted_without_replacement(pool, quota, rng)
             else:
                 # Quota exceeds unique pool size: take the whole pool first
                 # (each distinct task appears at least once) then fill the
                 # rest with replacement, which is the minimum amount of
                 # duplication consistent with the requested count.
-                picks = list(pool) + rng.choices(pool, k=quota - len(pool))
+                weights = [self._weight(item) for item in pool]
+                if sum(weights) <= 0.0:
+                    weights = [1.0 for _ in pool]
+                picks = list(pool) + rng.choices(pool, weights=weights, k=quota - len(pool))
             selected.extend(copy.deepcopy(p) for p in picks)
         return selected
 
@@ -206,6 +238,7 @@ class AdaptiveMixtureStrategy(MixtureStrategy):
             "AdaptiveMixtureStrategy("
             f"use_original={self._use_original}, synthetic_ratio={self._synthetic_ratio}, "
             f"category_weights={self._category_weights}, shuffle={self._shuffle}, "
+            f"task_weights={len(self._task_weights)}, "
             f"seed={self._seed}, target_size={self._target_size}, replacement={self._replacement}, "
             f"stratified={self._stratified}, stable_seed={self._stable_seed})"
         )

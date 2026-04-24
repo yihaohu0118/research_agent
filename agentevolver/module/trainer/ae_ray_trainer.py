@@ -70,6 +70,7 @@ from agentevolver.module.adv_processor.adca_grpo_pipeline import apply_adca_grpo
 from agentevolver.module.exp_manager.exp_manager import ExperienceManager
 from agentevolver.module.tocf import apply_apatch_advantage_weighting, apatch_enabled
 from agentevolver.module.tocf.controller import TOCFController
+from agentevolver.module.tocf.state import TOCFCapabilityState
 from agentevolver.module.tocf.stats import TOCFStats
 from agentevolver.module.tocf.category import infer_task_category
 
@@ -417,17 +418,41 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
         self._collate_fn=collate_fn
         tocf_cfg = config.get("tocf", {})
         tocf_enabled = bool(tocf_cfg.get("enable", False)) if tocf_cfg else False
-        stats_cfg = tocf_cfg.get("stats", {}) if tocf_cfg else {}
+        stats_cfg = (tocf_cfg.get("stats", {}) or {}) if tocf_cfg else {}
         stats_enabled = tocf_enabled and stats_cfg.get("enable", True)
         stats_dump_dir = stats_cfg.get("dump_dir", None)
-        self.tocf_stats = TOCFStats(dump_dir=stats_dump_dir) if stats_enabled else None
+        state_cfg = (tocf_cfg.get("state", {}) or {}) if tocf_cfg else {}
+        persistence_dir = (
+            state_cfg.get("dir", None)
+            or tocf_cfg.get("persistence_dir", None)
+            or stats_dump_dir
+        )
+        if tocf_enabled and not persistence_dir:
+            experiment_name = getattr(config.trainer, "experiment_name", "default")
+            persistence_dir = os.path.join("experiments", str(experiment_name), "tocf_state")
+        state_path = state_cfg.get("path", None) if state_cfg else None
+        if tocf_enabled and not state_path and persistence_dir:
+            state_path = os.path.join(str(persistence_dir), "capability_state.json")
+        self.tocf_state = TOCFCapabilityState.load(state_path) if tocf_enabled else None
+        self.tocf_stats_metrics_enabled = bool(stats_enabled)
+        self.tocf_stats = (
+            TOCFStats(
+                dump_dir=stats_dump_dir if stats_enabled else None,
+                capability_state=self.tocf_state,
+            )
+            if tocf_enabled
+            else None
+        )
         self.tocf_controller = TOCFController(tocf_cfg) if tocf_enabled else None
 
         from agentevolver.module.tocf.epatch import ExperienceBank, epatch_enabled
         if epatch_enabled(config):
             se_cfg = (tocf_cfg.get("self_evolution", {}) or {}) if tocf_cfg else {}
             max_per_cat = int(se_cfg.get("max_per_category", 5) or 5)
-            self.experience_bank = ExperienceBank(max_per_category=max_per_cat)
+            bank_path = se_cfg.get("path", None)
+            if not bank_path and persistence_dir:
+                bank_path = os.path.join(str(persistence_dir), "experience_bank.json")
+            self.experience_bank = ExperienceBank(max_per_category=max_per_cat, path=bank_path)
         else:
             self.experience_bank = None
 
@@ -440,13 +465,33 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
             sp_cfg = (tocf_cfg.get("strategy", {}) or {}) if tocf_cfg else {}
             prior_alpha = float(sp_cfg.get("prior_alpha", 1.0) or 1.0)
             prior_beta = float(sp_cfg.get("prior_beta", 1.0) or 1.0)
+            bandit_path = sp_cfg.get("path", None)
+            if not bandit_path and persistence_dir:
+                bandit_path = os.path.join(str(persistence_dir), "strategy_bandit.json")
             self.strategy_bandit = StrategyBandit(
                 library=_resolve_strategy_library(config),
                 prior_alpha=prior_alpha,
                 prior_beta=prior_beta,
+                hierarchical_prior_weight=float(sp_cfg.get("hierarchical_prior_weight", 0.5) or 0.5),
+                path=bandit_path,
             )
         else:
             self.strategy_bandit = None
+
+        from agentevolver.module.tocf.coevo import coevo_enabled
+        from agentevolver.module.tocf.task_bank import EvolvedTaskBank
+        if coevo_enabled(config):
+            coevo_cfg = (tocf_cfg.get("coevo", {}) or {}) if tocf_cfg else {}
+            bank_path = coevo_cfg.get("path", None)
+            if not bank_path and persistence_dir:
+                bank_path = os.path.join(str(persistence_dir), "evolved_task_bank.json")
+            self.evolved_task_bank = EvolvedTaskBank(
+                path=bank_path,
+                max_total=int(coevo_cfg.get("max_total_tasks", 256) or 256),
+                max_per_parent=int(coevo_cfg.get("max_per_parent", 16) or 16),
+            )
+        else:
+            self.evolved_task_bank = None
 
         self._create_dataloader_from_manager(collate_fn, shuffle_trainset)  # ⭐ Create dataloader from the provided manager
 
@@ -603,11 +648,18 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
             
             assert num_loaded_val_tasks > 0, "failed to load val/dev dataset from environment"
         
+        coevo_mix_ratio = float(OmegaConf.select(self.config, "tocf.coevo.mix_ratio", default=0.0) or 0.0)
+        initial_evolved_objectives = (
+            self.evolved_task_bank.objectives() if self.evolved_task_bank is not None else None
+        )
+
         self.train_dataset = FullDataset(
             self.train_task_manager,
             self.train_task_manager._mixture_strategy,
             self.train_task_manager._reward_config,
             self.config.task_manager.train_data_path,
+            initial_evolved_objectives=initial_evolved_objectives,
+            evolved_mix_ratio=coevo_mix_ratio,
             tokenizer=self.tokenizer,
             config=self.config.data,
             processor=self.processor,
@@ -673,6 +725,76 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                     self.config.critic.optim.total_training_steps = total_training_steps
         except Exception as e:
             print(f"Warning: Could not set total_training_steps in config. Structure missing? Error: {e}")
+
+
+    def _run_coevo_epoch(self, epoch: int | str) -> dict[str, float]:
+        if self.evolved_task_bank is None or self.tocf_state is None:
+            return {}
+
+        from agentevolver.module.tocf.coevo import (
+            coevo_enabled,
+            finalize_coevo_objectives,
+            select_coevo_seed_tasks,
+        )
+
+        if not coevo_enabled(self.config):
+            return {}
+
+        coevo_cfg = OmegaConf.select(self.config, "tocf.coevo", default={}) or {}
+        every_n_epochs = max(1, int(_cfg_lookup(coevo_cfg, "generate_every_n_epochs", 1) or 1))
+        if isinstance(epoch, int) and epoch % every_n_epochs != 0:
+            return {"tocf/coevo/skipped_epoch": 1.0}
+
+        checkpoint_dir = OmegaConf.select(self.config, "tocf.persistence_dir", default=None) or "."
+        checkpoint_path = os.path.join(str(checkpoint_dir), f"coevo_generate_epoch_{epoch}.checkpoint.json")
+
+        parent_tasks = select_coevo_seed_tasks(
+            self.train_task_manager.seed_tasks,
+            self.tocf_state,
+            self.config,
+            epoch=epoch,
+        )
+        metrics: dict[str, float] = {
+            "tocf/coevo/selected_parents": float(len(parent_tasks)),
+        }
+        if not parent_tasks:
+            metrics.update(self.evolved_task_bank.metrics())
+            return metrics
+
+        generated = self.train_task_manager.generate_task(
+            parent_tasks,
+            show_progress=False,
+            resume_file=checkpoint_path,
+        )
+        metrics["tocf/coevo/generated_candidates"] = float(len(generated))
+        finalized = finalize_coevo_objectives(
+            generated,
+            synthetic_grader=self.train_task_manager._reward_config["synthetic_grader"],
+            epoch=epoch,
+        )
+        metrics["tocf/coevo/finalized_candidates"] = float(len(finalized))
+
+        accepted = self.evolved_task_bank.add_candidates(
+            finalized,
+            min_confidence=float(_cfg_lookup(coevo_cfg, "min_confidence", 0.4) or 0.4),
+            max_new=int(_cfg_lookup(coevo_cfg, "max_new_tasks_per_epoch", 32) or 32),
+            existing_queries=self.train_dataset.existing_objective_queries(),
+            min_query_chars=int(_cfg_lookup(coevo_cfg, "min_query_chars", 24) or 24),
+            min_query_tokens=int(_cfg_lookup(coevo_cfg, "min_query_tokens", 5) or 5),
+            max_query_similarity=float(_cfg_lookup(coevo_cfg, "max_query_similarity", 0.9) or 0.9),
+            max_jaccard_similarity=float(_cfg_lookup(coevo_cfg, "max_jaccard_similarity", 0.8) or 0.8),
+        )
+        metrics["tocf/coevo/accepted_candidates"] = float(len(accepted))
+        retired = self.evolved_task_bank.retire_stale(
+            current_epoch=epoch,
+            max_staleness=_cfg_lookup(coevo_cfg, "retire_after_epochs", None),
+        )
+        metrics["tocf/coevo/retired_candidates"] = float(retired)
+        if accepted or retired:
+            self.train_dataset.set_evolved_objectives(self.evolved_task_bank.objectives())
+        self.evolved_task_bank.save()
+        metrics.update(self.evolved_task_bank.metrics())
+        return metrics
 
 
     def _get_attribution_config(self):
@@ -1367,6 +1489,7 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                                         ground_truth=gen_batch.non_tensor_batch['extras'][i]['ground_truth']
                                     ) for i in range(len(gen_batch))
                             ]
+
                             task_exp_configs = self.exp_manager.get_complete_exp_configs(tasks, mode="sample")
                             assert len(task_exp_configs)==len(tasks), "{len(task_exp_configs)=}, {len(gen_batch)=}"
 
@@ -1374,14 +1497,26 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                             if self.experience_bank is not None:
                                 from agentevolver.module.tocf.epatch import apply_experience_injection
                                 for _task in tasks:
-                                    apply_experience_injection(_task, self.experience_bank, self.config, mode="sample")
+                                    apply_experience_injection(
+                                        _task,
+                                        self.experience_bank,
+                                        self.config,
+                                        mode="sample",
+                                        capability_state=self.tocf_state,
+                                    )
                             # ==================== End E-Patch ====================
 
                             # ==================== S-Patch: inject bandit-selected strategy ====================
                             if self.strategy_bandit is not None:
                                 from agentevolver.module.tocf.spatch import apply_strategy_injection
                                 for _task in tasks:
-                                    apply_strategy_injection(_task, self.strategy_bandit, self.config, mode="sample")
+                                    apply_strategy_injection(
+                                        _task,
+                                        self.strategy_bandit,
+                                        self.config,
+                                        mode="sample",
+                                        capability_state=self.tocf_state,
+                                    )
                             # ==================== End S-Patch ====================
 
                             print("=" * 10 + "start fit rollout" + "=" * 10)
@@ -1390,12 +1525,18 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                             print("=" * 10 + "end fit rollout" + "=" * 10)
                             if self.tocf_stats is not None:
                                 self.tocf_stats.observe(tasks, trajectories, epoch, self.global_steps)
-                                metrics.update(self.tocf_stats.metrics())
+                                if self.tocf_stats_metrics_enabled:
+                                    metrics.update(self.tocf_stats.metrics())
 
                             # ==================== E-Patch: ingest successful trajectories ====================
                             if self.experience_bank is not None:
                                 from agentevolver.module.tocf.epatch import ingest_from_trajectories
-                                ep_metrics = ingest_from_trajectories(self.experience_bank, trajectories, self.config)
+                                ep_metrics = ingest_from_trajectories(
+                                    self.experience_bank,
+                                    trajectories,
+                                    self.config,
+                                    global_step=self.global_steps,
+                                )
                                 metrics.update(ep_metrics)
                             # ==================== End E-Patch ingest ====================
 
@@ -1403,7 +1544,10 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                             if self.strategy_bandit is not None:
                                 from agentevolver.module.tocf.spatch import update_bandit_from_trajectories
                                 sp_metrics = update_bandit_from_trajectories(
-                                    self.strategy_bandit, trajectories, self.config
+                                    self.strategy_bandit,
+                                    trajectories,
+                                    self.config,
+                                    capability_state=self.tocf_state,
                                 )
                                 metrics.update(sp_metrics)
                             # ==================== End S-Patch update ====================
@@ -1587,6 +1731,8 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                                 batch=batch,
                                 config=self.config,
                                 env_type=self.config.env_service.env_type,
+                                capability_state=self.tocf_state,
+                                global_step=self.global_steps,
                             )
                             metrics.update(apatch_metrics)
                         # ==================== End A-Patch ====================
@@ -1704,14 +1850,20 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                 print("DEBUG: change ratio of synthetic data from 1 to 0.5")
                 assert isinstance(self.train_dataset._mixture_strategy,UnifiedMixtureStrategy)
                 self.train_dataset._mixture_strategy._synthetic_ratio-=1/5 # initial 1, 0 at about epoch 5 (about step 30)
-            if self.tocf_stats is not None:
-                self.tocf_stats.dump(f"epoch_{epoch}.json")
+                if self.tocf_stats is not None:
+                    if self.tocf_stats_metrics_enabled:
+                        self.tocf_stats.dump(f"epoch_{epoch}.json")
 
-                if self.tocf_controller is not None:
-                    decision = self.tocf_controller.accept(self.tocf_controller.propose(self.tocf_stats))
-                    if decision is not None and decision.accepted:
-                        self.train_dataset.apply_tocf_patches(decision)
-                    logger.log(data=self.tocf_controller.metrics(), step=self.global_steps)
+                    if self.tocf_controller is not None:
+                        decision = self.tocf_controller.accept(self.tocf_controller.propose(self.tocf_stats))
+                        if decision is not None and decision.accepted:
+                            self.train_dataset.apply_tocf_patches(decision)
+                        logger.log(data=self.tocf_controller.metrics(), step=self.global_steps)
+
+                    if self.evolved_task_bank is not None:
+                        logger.log(data=self._run_coevo_epoch(epoch), step=self.global_steps)
 
                 self.tocf_stats.reset_window()
+                if self.tocf_state is not None:
+                    self.tocf_state.save()
             self.train_dataset.update()  # ⭐ Update the training dataset for the next iteration

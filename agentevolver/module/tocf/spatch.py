@@ -49,11 +49,14 @@ Config path (all under ``tocf.strategy``):
 """
 from __future__ import annotations
 
+import json
 import math
+import os
 import random
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
+from agentevolver.module.tocf.state import TOCFCapabilityState
 from agentevolver.schema.task import Task
 
 
@@ -210,17 +213,25 @@ class StrategyBandit:
         library: Dict[str, Dict[str, Any]],
         prior_alpha: float = 1.0,
         prior_beta: float = 1.0,
+        hierarchical_prior_weight: float = 0.5,
+        path: str | None = None,
     ):
         self._library = library
         self._prior_alpha = float(prior_alpha)
         self._prior_beta = float(prior_beta)
+        self._hierarchical_prior_weight = max(0.0, float(hierarchical_prior_weight))
+        self.path = path
         # (category, tag) -> strategy_id -> (wins, pulls)
         self._stats: Dict[Tuple[str, str], Dict[str, List[float]]] = defaultdict(dict)
+        # tag -> strategy_id -> (wins, pulls), used as a shared prior.
+        self._global_stats: Dict[str, Dict[str, List[float]]] = defaultdict(dict)
         # task_id -> last failure tag observed
         self._last_tag_by_task: Dict[str, str] = {}
         # diagnostics
         self._total_pulls = 0
         self._total_wins = 0
+        if path:
+            self.load(path)
 
     # ── Tag / key handling ────────────────────────────────────────────────
 
@@ -275,8 +286,13 @@ class StrategyBandit:
         best_score: float = -1.0
         for sid in candidates:
             wins, pulls = bucket.get(sid, [0.0, 0.0])
-            alpha = self._prior_alpha + wins
-            beta = self._prior_beta + max(0.0, pulls - wins)
+            global_wins, global_pulls = self._global_stats.get(key[1], {}).get(sid, [0.0, 0.0])
+            alpha = self._prior_alpha + wins + self._hierarchical_prior_weight * global_wins
+            beta = (
+                self._prior_beta
+                + max(0.0, pulls - wins)
+                + self._hierarchical_prior_weight * max(0.0, global_pulls - global_wins)
+            )
             score = rng.betavariate(alpha, beta)
             if score > best_score:
                 best_score = score
@@ -304,6 +320,13 @@ class StrategyBandit:
         self._total_pulls += 1
         bucket[strategy_id] = [wins, pulls]
 
+        global_bucket = self._global_stats[key[1]]
+        global_wins, global_pulls = global_bucket.get(strategy_id, [0.0, 0.0])
+        global_pulls += 1.0
+        if success:
+            global_wins += 1.0
+        global_bucket[strategy_id] = [global_wins, global_pulls]
+
     # ── Diagnostics ───────────────────────────────────────────────────────
 
     def strategy_text(self, strategy_id: str) -> str:
@@ -320,6 +343,7 @@ class StrategyBandit:
                 else 0.0
             ),
             f"{prefix}/num_keys": float(len(self._stats)),
+            f"{prefix}/num_global_keys": float(len(self._global_stats)),
         }
         # Per-strategy aggregated winrate across all keys.
         sid_wins: Dict[str, float] = defaultdict(float)
@@ -334,6 +358,69 @@ class StrategyBandit:
             m[f"{prefix}/winrate/{sid}"] = float(sid_wins[sid]) / float(pulls)
             m[f"{prefix}/pulls/{sid}"] = float(pulls)
         return m
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "stats": {
+                f"{category}::{tag}": bucket
+                for (category, tag), bucket in self._stats.items()
+            },
+            "global_stats": {tag: bucket for tag, bucket in self._global_stats.items()},
+            "last_tag_by_task": dict(self._last_tag_by_task),
+            "total_pulls": self._total_pulls,
+            "total_wins": self._total_wins,
+            "prior_alpha": self._prior_alpha,
+            "prior_beta": self._prior_beta,
+            "hierarchical_prior_weight": self._hierarchical_prior_weight,
+        }
+
+    def load(self, path: str | None = None) -> None:
+        target = path or self.path
+        if not target or not os.path.exists(target):
+            return
+        try:
+            with open(target, "r", encoding="utf-8") as handle:
+                raw = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            return
+
+        stats: Dict[Tuple[str, str], Dict[str, List[float]]] = defaultdict(dict)
+        for raw_key, bucket in dict(raw.get("stats") or {}).items():
+            if "::" in raw_key:
+                category, tag = raw_key.split("::", 1)
+            else:
+                category, tag = self._NONE_CAT, raw_key
+            stats[(category, tag)] = {
+                str(sid): [float(values[0]), float(values[1])]
+                for sid, values in dict(bucket or {}).items()
+                if isinstance(values, list) and len(values) >= 2
+            }
+        self._stats = stats
+        self._global_stats = defaultdict(
+            dict,
+            {
+                str(tag): {
+                    str(sid): [float(values[0]), float(values[1])]
+                    for sid, values in dict(bucket or {}).items()
+                    if isinstance(values, list) and len(values) >= 2
+                }
+                for tag, bucket in dict(raw.get("global_stats") or {}).items()
+            },
+        )
+        self._last_tag_by_task = {
+            str(task_id): str(tag)
+            for task_id, tag in dict(raw.get("last_tag_by_task") or {}).items()
+        }
+        self._total_pulls = int(raw.get("total_pulls", 0) or 0)
+        self._total_wins = int(raw.get("total_wins", 0) or 0)
+
+    def save(self, path: str | None = None) -> None:
+        target = path or self.path
+        if not target:
+            return
+        os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+        with open(target, "w", encoding="utf-8") as handle:
+            json.dump(self.to_dict(), handle, ensure_ascii=False, indent=2)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -366,11 +453,34 @@ def _dominant_failure_tag(tags: List[str]) -> str:
     return StrategyBandit._UNKNOWN_TAG
 
 
+def _state_last_tag(
+    capability_state: TOCFCapabilityState | None,
+    task_id: Optional[str],
+) -> str:
+    if capability_state is None or not task_id:
+        return StrategyBandit._UNKNOWN_TAG
+    task_state = capability_state.tasks.get(str(task_id)) or {}
+    tag = str(task_state.get("last_tag") or StrategyBandit._UNKNOWN_TAG)
+    return tag or StrategyBandit._UNKNOWN_TAG
+
+
+def _resolve_prior_tag(
+    task_id: Optional[str],
+    bandit: StrategyBandit,
+    capability_state: TOCFCapabilityState | None = None,
+) -> str:
+    state_tag = _state_last_tag(capability_state, task_id)
+    if state_tag != StrategyBandit._UNKNOWN_TAG:
+        return state_tag
+    return bandit.get_last_tag(task_id)
+
+
 def apply_strategy_injection(
     task: Task,
     bandit: StrategyBandit,
     config: Any,
     mode: str | None = None,
+    capability_state: TOCFCapabilityState | None = None,
 ) -> Optional[str]:
     """Inject a bandit-selected strategy hint into ``task.query``.
 
@@ -398,7 +508,7 @@ def apply_strategy_injection(
     if not category:
         category = infer_task_category(task.task_id, task.env_type, task.metadata)
 
-    tag = bandit.get_last_tag(task.task_id)
+    tag = _resolve_prior_tag(task.task_id, bandit, capability_state)
     strategy_id = bandit.select(category, tag)
     if not strategy_id:
         return None
@@ -425,6 +535,7 @@ def update_bandit_from_trajectories(
     bandit: StrategyBandit,
     trajectories: list,
     config: Any,
+    capability_state: TOCFCapabilityState | None = None,
 ) -> Dict[str, float]:
     """Post-rollout: update bandit statistics and task→tag cache.
 
@@ -464,7 +575,11 @@ def update_bandit_from_trajectories(
         # task metadata (injected by apply_strategy_injection).
         tocf_meta = meta.get("tocf") or {}
         strategy_id = tocf_meta.get("spatch_strategy")
-        prior_tag = tocf_meta.get("spatch_prior_tag") or bandit.get_last_tag(task_id)
+        prior_tag = tocf_meta.get("spatch_prior_tag") or _resolve_prior_tag(
+            task_id,
+            bandit,
+            capability_state,
+        )
 
         success = bool(getattr(traj, "success", False))
 
@@ -483,4 +598,5 @@ def update_bandit_from_trajectories(
     metrics["tocf/spatch/updates"] = float(updated)
     metrics["tocf/spatch/injected_batch"] = float(injected_count)
     metrics["tocf/spatch/successful_batch_updates"] = float(success_updates)
+    bandit.save()
     return metrics

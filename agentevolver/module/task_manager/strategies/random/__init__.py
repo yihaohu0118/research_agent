@@ -103,7 +103,7 @@ class LlmRandomSamplingExploreStrategy(TaskExploreStrategy):
         trajectory.steps[2]['content'] = "[MASKED]"
         
         system_prompt, user_prompt = get_task_summarize_prompt(
-            [trajectory], old_objectives, self.env_profile
+            [trajectory], old_objectives, self.env_profile, seed_task=task
         )
         messages = [
             {"role": "system", "content": system_prompt},

@@ -1,0 +1,45 @@
+# TOCF + minimal co-evolution loop.
+#
+# This variant keeps the existing T/A/E/S stack and additionally:
+#   - selects weak BFCL seed tasks from TOCF capability state,
+#   - generates targeted harder task variants,
+#   - stores accepted variants in a persistent evolved-task bank,
+#   - mixes a small ratio of those variants into later training epochs.
+
+defaults:
+  - bfcl_tocf_taes
+  - _self_
+
+trainer:
+  project_name: bfcl_tocf_taes_coevo
+  experiment_name: bfcl_taes_coevo_grpo_official_split
+
+tocf:
+  persistence_dir: experiments/bfcl_tocf_taes_coevo/tocf_state
+
+  state:
+    dir: experiments/bfcl_tocf_taes_coevo/tocf_state
+
+  stats:
+    dump_dir: experiments/bfcl_tocf_taes_coevo/tocf_stats
+
+  coevo:
+    enable: true
+    generate_every_n_epochs: 1
+    max_seed_tasks: 8
+    max_new_tasks_per_epoch: 24
+    max_total_tasks: 192
+    max_per_parent: 8
+    min_task_observations: 2
+    min_samples: 4
+    min_task_weight: 1.05
+    min_confidence: 0.45
+    min_query_chars: 24
+    min_query_tokens: 5
+    max_query_similarity: 0.9
+    max_jaccard_similarity: 0.8
+    selection_alpha: 0.75
+    selection_max_weight: 2.5
+    category_fallback: true
+    mix_ratio: 0.25
+    retire_after_epochs: 4
