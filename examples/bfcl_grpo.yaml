@@ -19,12 +19,11 @@ defaults:
 # ── Data ──────────────────────────────────────────────────────────────────────
 data:
   # T3RL official BFCL split: 800 = train400 + val100 + test300.
-  # Training-time fast val uses the 100-row `bfcl_val.parquet` (aligned with T3RL train script).
-  # For the final non-train 400 eval, run with:
-  #   data.val_files=data/bfcl_eval_400.parquet trainer.val_only=true
+  # Validation here runs on all non-train examples: val100 + test300 = `bfcl_eval_400.parquet`.
+  # For a faster 100-sample val loop (T3RL-style dev), override: data.val_files=data/bfcl_val.parquet
   # NOTE: do NOT use `data/bfcl_test_400.parquet` (deprecated train/test-mixed stub).
   train_files: data/bfcl_train.parquet
-  val_files: data/bfcl_val.parquet
+  val_files: data/bfcl_eval_400.parquet
   train_batch_size: 16
   max_prompt_length: 8192
   max_response_length: 4096
