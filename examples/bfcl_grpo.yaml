@@ -18,10 +18,13 @@ defaults:
 
 # ── Data ──────────────────────────────────────────────────────────────────────
 data:
-  # Official BFCL train/test parquet split. Keep this aligned with the
-  # external BFCL CLI eval instead of the custom 400/400 mixed probe split.
+  # T3RL official BFCL split: 800 = train400 + val100 + test300.
+  # Training-time fast val uses the 100-row `bfcl_val.parquet` (aligned with T3RL train script).
+  # For the final non-train 400 eval, run with:
+  #   data.val_files=data/bfcl_eval_400.parquet trainer.val_only=true
+  # NOTE: do NOT use `data/bfcl_test_400.parquet` (deprecated train/test-mixed stub).
   train_files: data/bfcl_train.parquet
-  val_files: data/bfcl_test.parquet
+  val_files: data/bfcl_val.parquet
   train_batch_size: 16
   max_prompt_length: 8192
   max_response_length: 4096
