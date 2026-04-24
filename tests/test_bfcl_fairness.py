@@ -9,18 +9,31 @@ try:
         tool_message_to_qwen_text,
         tools_schema_to_qwen_prompt,
     )
-    from env_service.environments.bfcl.env_handler import EnvHandler
 except ModuleNotFoundError as exc:
     if exc.name and exc.name.startswith("env_service"):
         raise
     parse_assistant_content_to_tool_calls = None
     tool_message_to_qwen_text = None
     tools_schema_to_qwen_prompt = None
+
+try:
+    from env_service.environments.bfcl.env_handler import EnvHandler
+except ModuleNotFoundError as exc:
+    if exc.name and exc.name.startswith("env_service"):
+        raise
     EnvHandler = None
 
 
 def _require_bfcl_eval() -> bool:
     return EnvHandler is not None and parse_assistant_content_to_tool_calls is not None
+
+
+def _require_bfcl_helpers() -> bool:
+    return (
+        parse_assistant_content_to_tool_calls is not None
+        and tool_message_to_qwen_text is not None
+        and tools_schema_to_qwen_prompt is not None
+    )
 
 
 def _tool_call(name: str, arguments: dict) -> dict:
@@ -98,8 +111,8 @@ def test_rejected_tool_calls_are_not_extracted_for_eval():
     ]
 
 
-def test_bfcl_prompt_defaults_to_t3rl_text():
-    if not _require_bfcl_eval():
+def test_bfcl_prompt_defaults_to_qwen_fc_protocol():
+    if not _require_bfcl_helpers():
         return
 
     prompt = tools_schema_to_qwen_prompt(
@@ -115,7 +128,33 @@ def test_bfcl_prompt_defaults_to_t3rl_text():
         {"role": "tool", "content": {"ok": True}, "tool_call_id": "noop_1"}
     )
 
+    assert "# Tools" in prompt
+    assert "Your response must always start" not in prompt
+    assert "within <tool_call></tool_call> XML tags" in prompt
+    assert "<tool_response>" in tool_text
+
+
+def test_bfcl_t3rl_protocol_stays_available():
+    if not _require_bfcl_helpers():
+        return
+
+    prompt = tools_schema_to_qwen_prompt(
+        [
+            {
+                "name": "noop",
+                "description": "No-op tool.",
+                "parameters": {"type": "dict", "properties": {}, "required": []},
+            }
+        ],
+        prompt_mode="t3rl_text",
+    )
+    tool_text = tool_message_to_qwen_text(
+        {"role": "tool", "content": {"ok": True}, "tool_call_id": "noop_1"},
+        result_mode="plain_user",
+    )
+
     assert "Your response must always start" in prompt
+    assert "<tool_response>" not in tool_text
     assert "<tool_call>" not in tool_text
 
 
@@ -140,5 +179,6 @@ if __name__ == "__main__":
     test_strict_parser_rejects_malformed_tool_tags()
     test_unavailable_tool_is_rejected_before_execution()
     test_rejected_tool_calls_are_not_extracted_for_eval()
-    test_bfcl_prompt_defaults_to_t3rl_text()
+    test_bfcl_prompt_defaults_to_qwen_fc_protocol()
+    test_bfcl_t3rl_protocol_stays_available()
     test_clean_trajectory_flags_tool_errors()

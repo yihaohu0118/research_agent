@@ -44,8 +44,8 @@ defaults:
 
 # ── Data ──────────────────────────────────────────────────────────────────────
 data:
-  train_files: data/bfcl_train_400.parquet
-  val_files: data/bfcl_test_400.parquet
+  train_files: data/bfcl_train.parquet
+  val_files: data/bfcl_test.parquet
   train_batch_size: 16
   max_prompt_length: 8192
   max_response_length: 4096
@@ -136,8 +136,8 @@ env_service:
   bfcl:
     strict_tool_parser: true
     enforce_available_tools: true
-    tool_prompt_mode: t3rl_text
-    tool_result_mode: plain_user
+    tool_prompt_mode: bfcl_qwen_fc
+    tool_result_mode: bfcl_tool_response
 
 # ── Trainer ───────────────────────────────────────────────────────────────────
 trainer:
@@ -146,7 +146,7 @@ trainer:
   critic_warmup: 0
   logger: ["console"]
   project_name: bfcl_tocf_coevo
-  experiment_name: bfcl_coevo_grpo_400x400
+  experiment_name: bfcl_coevo_grpo_official_split
   save_freq: 0
   save_best_checkpoint: false
   keep_only_best_checkpoint: true

@@ -27,8 +27,6 @@ from env_service.registry import Registry
 from env_service.trajectory import StateMessage, ActionMessage, ToolCall
 
 
-from env_service.environments.bfcl.env_handler import EnvHandler
-
 # 默认路径，可用环境变量覆盖
 os.environ.setdefault("BFCL_DATA_PATH", "./bfcl_data/multiturn_data.jsonl")
 os.environ.setdefault("BFCL_ANSWER_PATH", "./bfcl_eval/possible_answer")
@@ -147,7 +145,7 @@ def parse_assistant_content_to_tool_calls(
 
     return result
 
-def tools_schema_to_qwen_prompt(tools_schema, prompt_mode: str = "t3rl_text"):
+def tools_schema_to_qwen_prompt(tools_schema, prompt_mode: str = "bfcl_qwen_fc"):
     """
     将 tools_schema 转换为符合 Qwen 模型 chat_template 的工具描述 prompt。
 
@@ -172,7 +170,11 @@ def tools_schema_to_qwen_prompt(tools_schema, prompt_mode: str = "t3rl_text"):
         return ""
 
     lines = []
-    if prompt_mode == "t3rl_text":
+    if prompt_mode == "bfcl_qwen_fc":
+        lines.append("# Tools\n")
+        lines.append("You may call one or more functions to assist with the user query.\n")
+        lines.append("You are provided with function signatures within <tools></tools> XML tags:")
+    elif prompt_mode == "t3rl_text":
         lines.append(T3RL_BFCL_SYSTEM_PROMPT.strip())
         lines.append("\n\n# Tools\n")
         lines.append("You are provided with function signatures within <tools></tools> XML tags:")
@@ -181,16 +183,24 @@ def tools_schema_to_qwen_prompt(tools_schema, prompt_mode: str = "t3rl_text"):
         lines.append("You may call one or more functions to assist with the user query.\n")
         lines.append("You are provided with function signatures within <tools></tools> XML tags:")
     lines.append("<tools>")
-    # 逐个添加工具定义（JSON 格式，不转义）
     for tool in tools_schema:
-        tool_json = json.dumps(
-            tool,
-            ensure_ascii=False,
-            separators=(',', ':')  # 紧凑格式，不加空格
-        )
+        if prompt_mode == "bfcl_qwen_fc":
+            # Match BFCL's QwenFCHandler prompt style as closely as possible.
+            tool_json = json.dumps(tool)
+        else:
+            tool_json = json.dumps(
+                tool,
+                ensure_ascii=False,
+                separators=(',', ':')
+            )
         lines.append(tool_json)
     lines.append("</tools>\n")
-    if prompt_mode != "t3rl_text":
+    if prompt_mode == "bfcl_qwen_fc":
+        lines.append("For each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:")
+        lines.append("<tool_call>")
+        lines.append('{"name": <function-name>, "arguments": <args-json-object>}')
+        lines.append("</tool_call>")
+    elif prompt_mode != "t3rl_text":
         lines.append("Important: Always use only the latest tool list provided, ignoring any functions mentioned in previous messages.")
         lines.append("For each function call, return a json object with function name and arguments within <tool_call> and <tool_call> XML tags:")
         lines.append("<tool_call>")
@@ -199,7 +209,7 @@ def tools_schema_to_qwen_prompt(tools_schema, prompt_mode: str = "t3rl_text"):
 
     return "\n".join(lines)
 
-def tool_message_to_qwen_text(tool_messages, result_mode: str = "plain_user"):
+def tool_message_to_qwen_text(tool_messages, result_mode: str = "bfcl_tool_response"):
     """
     将 role 为 'tool' 的消息列表转换为符合 Qwen chat_template 格式的字符串。
     支持单个或多个连续的 tool 消息。
@@ -216,9 +226,8 @@ def tool_message_to_qwen_text(tool_messages, result_mode: str = "plain_user"):
     if not tool_messages:
         return ""
 
-    # Build each tool result as either the legacy <tool_call> wrapper or a plain
-    # observation-style user message. The latter is a diagnostic probe for T3RL
-    # alignment; it intentionally keeps role=user in the wider AgentEvolver loop.
+    # AgentEvolver feeds tool observations back as user-role text. The
+    # bfcl_tool_response branch mirrors BFCL QwenFCHandler's tool rendering.
     tool_entries = []
     for msg in tool_messages:
         if msg.get("role") != "tool":
@@ -231,6 +240,14 @@ def tool_message_to_qwen_text(tool_messages, result_mode: str = "plain_user"):
 
         if not name:
             raise ValueError("Missing 'name' in tool message.")
+
+        if result_mode == "bfcl_tool_response":
+            if isinstance(content, str):
+                content_text = content
+            else:
+                content_text = json.dumps(content, ensure_ascii=False)
+            tool_entries.append(f"<tool_response>\n{content_text}\n</tool_response>")
+            continue
 
         # 确保 content 是 JSON 可序列化对象
         try:
@@ -283,7 +300,7 @@ class BfclEnv(BaseEnv):
         # runtime
         self.test_entry: Dict[str, Any] | None = None
         self.original_test_entry: Dict[str, Any] | None = None
-        self.env_handler: EnvHandler | None = None
+        self.env_handler = None
         self.conversation_history: list[Dict[str, Any]] = []
         self.current_turn = 0
         self.total_input_tokens = 0
@@ -301,6 +318,8 @@ class BfclEnv(BaseEnv):
         self.original_test_entry = self.test_entry
 
         # 必须成功实例化真实 EnvHandler
+        from env_service.environments.bfcl.env_handler import EnvHandler
+
         self.env_handler = EnvHandler(
             model_name=self.model_name, answer_path=Path(self.answer_path)
         )
@@ -330,7 +349,7 @@ class BfclEnv(BaseEnv):
         # system_prompt = system_prompt_template.format(functions=function_docs)
         tool_prompt = tools_schema_to_qwen_prompt(
             tools,
-            prompt_mode=self.params.get("tool_prompt_mode", "t3rl_text"),
+            prompt_mode=self.params.get("tool_prompt_mode", "bfcl_qwen_fc"),
         )
         return {
             # system_prompt + "\n\n" + first_query
@@ -447,7 +466,7 @@ class BfclEnv(BaseEnv):
                 # FIXME 改成一次性传入所有tool messages
                 next_msg_content += tool_message_to_qwen_text(
                     msg,
-                    result_mode=self.params.get("tool_result_mode", "plain_user"),
+                    result_mode=self.params.get("tool_result_mode", "bfcl_tool_response"),
                 )
             elif msg["role"] == "user":
                 next_msg_content = msg.get("content", "")

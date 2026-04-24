@@ -93,12 +93,10 @@ env_service:
     strict_tool_parser: true
     # Reject calls to functions that have not been exposed in the current tool list.
     enforce_available_tools: true
-    # legacy: current AE hand-written tool prompt.
-    # t3rl_text: T3RL-style system instruction plus text-rendered tool schemas.
-    tool_prompt_mode: t3rl_text
-    # legacy: current AE <tool_call>{"name", "content"}</tool_call> wrapper.
-    # plain_user: user-role observation text without a tool_call wrapper.
-    tool_result_mode: plain_user
+    # bfcl_qwen_fc mirrors BFCL's QwenFCHandler tool prompt.
+    tool_prompt_mode: bfcl_qwen_fc
+    # bfcl_tool_response mirrors BFCL's <tool_response> observation wrapper.
+    tool_result_mode: bfcl_tool_response
 
 trainer:
   n_gpus_per_node: 4

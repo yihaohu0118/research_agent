@@ -287,6 +287,32 @@ missing_required_files() {
   return "${missing}"
 }
 
+check_bfcl_required_splits() {
+  local csv="$1"
+  local -a files=()
+  if [[ -n "${csv}" ]]; then
+    local old_ifs="${IFS}"
+    IFS=','
+    read -r -a files <<<"${csv}"
+    IFS="${old_ifs}"
+  fi
+
+  local path
+  for path in "${files[@]}"; do
+    [[ -z "${path}" ]] && continue
+    case "${path}" in
+      *bfcl_train*.parquet)
+        "${PYTHON_BIN}" "${PROJECT_ROOT}/scripts/test/check_bfcl_parquet_split.py" \
+          "${PROJECT_ROOT}/${path}" --expect-split train
+        ;;
+      *bfcl_test*.parquet)
+        "${PYTHON_BIN}" "${PROJECT_ROOT}/scripts/test/check_bfcl_parquet_split.py" \
+          "${PROJECT_ROOT}/${path}" --expect-split test
+        ;;
+    esac
+  done
+}
+
 OVERRIDES=()
 
 build_overrides() {
@@ -335,6 +361,10 @@ run_experiment() {
     fi
     echo "[experiment] required files are missing for ${name}." >&2
     return 1
+  fi
+
+  if [[ "${DRY_RUN}" != "1" && "${services_csv}" == *bfcl* ]]; then
+    check_bfcl_required_splits "${required_csv}"
   fi
 
   local -a services=()
@@ -399,7 +429,7 @@ APPWORLD_EXPERIMENTS=(
   "overall|appworld,reme|"
 )
 
-# BFCL ablation ladder (same 400-train / 400-test split for all rows; same
+# BFCL ablation ladder (same official BFCL train/test split for all rows; same
 # universal hyperparameters lr=1e-6, entropy_coeff=0, total_epochs=10,
 # temperature=1.0, strict_tool_parser=true across every row):
 #   bfcl_grpo        — pure GRPO, no TOCF patches
@@ -410,13 +440,13 @@ APPWORLD_EXPERIMENTS=(
 #   bfcl_tocf_coevo — GRPO + A + E + S (cold-start co-evolution)
 #   bfcl_tocf_ae    — GRPO + A + E only (cold-start; pair with coevo for Δ_S)
 BFCL_EXPERIMENTS=(
-  "bfcl_grpo|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
-  "bfcl_tocf_tpatch|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
-  "bfcl_tocf_fpatch|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
-  "bfcl_tocf_cpatch|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
-  "bfcl_tocf_apatch|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
-  "bfcl_tocf_coevo|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
-  "bfcl_tocf_ae|bfcl|data/bfcl_train_400.parquet,data/bfcl_test_400.parquet"
+  "bfcl_grpo|bfcl|data/bfcl_train.parquet,data/bfcl_test.parquet"
+  "bfcl_tocf_tpatch|bfcl|data/bfcl_train.parquet,data/bfcl_test.parquet"
+  "bfcl_tocf_fpatch|bfcl|data/bfcl_train.parquet,data/bfcl_test.parquet"
+  "bfcl_tocf_cpatch|bfcl|data/bfcl_train.parquet,data/bfcl_test.parquet"
+  "bfcl_tocf_apatch|bfcl|data/bfcl_train.parquet,data/bfcl_test.parquet"
+  "bfcl_tocf_coevo|bfcl|data/bfcl_train.parquet,data/bfcl_test.parquet"
+  "bfcl_tocf_ae|bfcl|data/bfcl_train.parquet,data/bfcl_test.parquet"
 )
 
 SELECTED_EXPERIMENTS=()

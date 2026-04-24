@@ -138,8 +138,8 @@ env_service:
   bfcl:
     strict_tool_parser: true
     enforce_available_tools: true
-    tool_prompt_mode: t3rl_text
-    tool_result_mode: plain_user
+    tool_prompt_mode: bfcl_qwen_fc
+    tool_result_mode: bfcl_tool_response
 
 # ── Trainer ───────────────────────────────────────────────────────────────────
 trainer:

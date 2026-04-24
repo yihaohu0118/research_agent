@@ -17,7 +17,7 @@
 #      fits" not "missing params") and has no purchase on long_context. The
 #      new ``by_category`` path in agentevolver/module/tocf/patch.py looks up
 #      a cue per BFCL subset. Each cue is short and targets the *behaviour*
-#      gap between what the T3RL system prompt already covers and what the
+#      gap between what the BFCL Qwen-FC prompt already covers and what the
 #      category-specific failure mode needs.
 #
 #   2. Cues do NOT mention category labels.  If the suffix text said
@@ -27,14 +27,14 @@
 #      (e.g. "if none of the available tools fit, reply in text"), so the
 #      model learns a policy, not a label lookup.
 #
-#   3. apply_to_validation=false is hard-locked.  Eval runs under the T3RL
-#      system prompt baseline alone, so val accuracy reflects the policy
+#   3. apply_to_validation=false is hard-locked.  Eval runs under the BFCL
+#      Qwen-FC prompt baseline alone, so val accuracy reflects the policy
 #      rather than the cue. This is the only reliable way to read whether
 #      C-Patch's training signal actually transferred into the weights.
 #
 #   4. base category gets an empty cue (explicit control).  Not every
 #      category benefits from a cue; multi_turn_base is already the
-#      regime the T3RL system prompt handles best. An empty string here
+#      regime the base BFCL prompt handles best. An empty string here
 #      is treated as "hold out this category" and does NOT fall through
 #      to the legacy global suffix (see ``category_fallback`` behaviour
 #      of resolve_query_suffix).
@@ -51,8 +51,8 @@ defaults:
 
 # ── Data ──────────────────────────────────────────────────────────────────────
 data:
-  train_files: data/bfcl_train_400.parquet
-  val_files: data/bfcl_test_400.parquet
+  train_files: data/bfcl_train.parquet
+  val_files: data/bfcl_test.parquet
   train_batch_size: 16
   max_prompt_length: 8192
   max_response_length: 4096
@@ -144,11 +144,9 @@ env_service:
   bfcl:
     strict_tool_parser: true
     enforce_available_tools: true
-    # t3rl_text ships the T3RL permissive system prompt (including the
-    # "no-tool-fits → reply in text" clause). C-Patch stacks per-task
-    # cues on top of that baseline; see header for the rationale.
-    tool_prompt_mode: t3rl_text
-    tool_result_mode: plain_user
+    # Match the external BFCL Qwen FC evaluator prompt/observation protocol.
+    tool_prompt_mode: bfcl_qwen_fc
+    tool_result_mode: bfcl_tool_response
 
 # ── Trainer ───────────────────────────────────────────────────────────────────
 trainer:
@@ -157,7 +155,7 @@ trainer:
   critic_warmup: 0
   logger: ["console"]
   project_name: "bfcl_tocf_cpatch"
-  experiment_name: "bfcl_cpatch_grpo_400x400"
+  experiment_name: "bfcl_cpatch_grpo_official_split"
   save_freq: 0
   save_best_checkpoint: false
   keep_only_best_checkpoint: true
@@ -240,33 +238,33 @@ tocf:
     suffix: ""
 
     # Behaviour-level cues. Each cue targets the gap between what the
-    # T3RL system prompt already covers ("you may reply in text when
+    # BFCL Qwen-FC prompt already covers ("you may reply in text when
     # no tool fits / when params are missing") and the per-category
     # failure mode's preferred action. Crucially, NO cue mentions the
     # category name itself -- that would leak a train-time label the
     # eval side cannot see.
     by_category:
-      # Base: no cue. The T3RL system prompt handles vanilla multi_turn
+      # Base: no cue. The BFCL Qwen-FC prompt handles vanilla multi_turn
       # well; an empty string here is treated as an explicit hold-out
       # (does NOT fall back to the global suffix).
       multi_turn_base: ""
 
       # miss_func: the correct behaviour is to refuse rather than pick
-      # the nearest-looking tool. The T3RL system prompt allows this
+      # the nearest-looking tool. The base BFCL prompt allows this
       # but does not forbid the failure mode; we forbid it explicitly.
       multi_turn_miss_func: >-
         If none of the available tools can fulfil this request, reply in
         natural language explaining what you cannot do. Do not pick the
         nearest-looking tool as a workaround.
 
-      # miss_param: the T3RL system prompt says "you may reply in text
+      # miss_param: the base BFCL prompt says "you may reply in text
       # when params are missing". The cue converts that permission into
       # a concrete action: ask the user.
       multi_turn_miss_param: >-
         If a required argument is not supplied by the user, ask a
         clarifying question instead of guessing a value.
 
-      # long_context: the T3RL system prompt says nothing about turn
+      # long_context: the base BFCL prompt says nothing about turn
       # scoping. This cue teaches the model to treat earlier turns as
       # state not as pending requests, which is the specific failure
       # mode this subset stresses.
