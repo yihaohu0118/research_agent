@@ -6,6 +6,11 @@
 #   - stores accepted variants in a persistent evolved-task bank,
 #   - mixes a small ratio of those variants into later training epochs.
 
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
 defaults:
   - bfcl_tocf_taes
   - _self_

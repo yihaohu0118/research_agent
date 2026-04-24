@@ -7,6 +7,11 @@
 #   - E-Patch replays ranked self-evolved memories.
 #   - S-Patch explores prompt strategies with a persistent hierarchical bandit.
 
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
 defaults:
   - bfcl_grpo
   - _self_
