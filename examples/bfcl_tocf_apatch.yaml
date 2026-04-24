@@ -9,9 +9,9 @@
 # Ablation position:
 #   - vs bfcl_grpo.yaml        : isolates the value of structured failure-mode
 #                                feedback on advantages under uniform sampling.
-#   - vs bfcl_tocf_fpatch.yaml : A-Patch = "which turns failed and how" (loss
-#                                side); F-Patch = "how much progress was made"
-#                                (reward side). Orthogonal signals.
+#   - vs bfcl_tocf_tpatch.yaml : A-Patch = "which turns failed and how" (loss
+#                                side); T-Patch = task budget allocation
+#                                (sampling side). Orthogonal signals.
 #   - vs bfcl_tocf_tpatch.yaml : T-Patch = "which categories to sample more";
 #                                A-Patch = "scale gradient by failure mode".
 #
