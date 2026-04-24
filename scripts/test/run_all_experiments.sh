@@ -435,7 +435,6 @@ APPWORLD_EXPERIMENTS=(
 #   bfcl_grpo        — pure GRPO, no TOCF patches
 #   bfcl_tocf_tpatch — isolated T-Patch (per-category task sampling) ablation
 #   bfcl_tocf_fpatch — isolated F-Patch (T3RL-style dense reward) ablation
-#   bfcl_tocf_cpatch — isolated C-Patch (per-category cue library) ablation
 #   bfcl_tocf_apatch — isolated A-Patch (tag-aware advantage weighting) ablation
 #   bfcl_tocf_coevo — GRPO + A + E + S (cold-start co-evolution)
 #   bfcl_tocf_ae    — GRPO + A + E only (cold-start; pair with coevo for Δ_S)
@@ -443,7 +442,6 @@ BFCL_EXPERIMENTS=(
   "bfcl_grpo|bfcl|data/bfcl_train.parquet,data/bfcl_test.parquet"
   "bfcl_tocf_tpatch|bfcl|data/bfcl_train.parquet,data/bfcl_test.parquet"
   "bfcl_tocf_fpatch|bfcl|data/bfcl_train.parquet,data/bfcl_test.parquet"
-  "bfcl_tocf_cpatch|bfcl|data/bfcl_train.parquet,data/bfcl_test.parquet"
   "bfcl_tocf_apatch|bfcl|data/bfcl_train.parquet,data/bfcl_test.parquet"
   "bfcl_tocf_coevo|bfcl|data/bfcl_train.parquet,data/bfcl_test.parquet"
   "bfcl_tocf_ae|bfcl|data/bfcl_train.parquet,data/bfcl_test.parquet"

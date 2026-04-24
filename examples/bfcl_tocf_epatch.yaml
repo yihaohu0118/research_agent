@@ -6,7 +6,7 @@
 #
 # Ablation position:
 #   - vs bfcl_grpo.yaml        : isolates the value of self-evolved demos.
-#   - vs bfcl_tocf_cpatch.yaml : C-Patch = static human-authored cues;
+#   - vs bfcl_tocf_spatch.yaml : S-Patch = learned strategy hints (bandit);
 #                                E-Patch = dynamic model-generated demos.
 #                                Both are prompt augmentation, but the signal
 #                                source is fundamentally different.
