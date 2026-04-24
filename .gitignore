@@ -128,11 +128,18 @@ venv/
 
 # Data files
 *.parquet
+# T3RL official BFCL split: 800 = train400 + val100 + test300
 !data/bfcl_train.parquet
+!data/bfcl_val.parquet
 !data/bfcl_test.parquet
+# Concatenated non-train eval set (val100 + test300 = 400) for trainer.val_only runs
+!data/bfcl_eval_400.parquet
+# Legacy / curriculum-stage datasets (kept for reproducibility)
+!data/bfcl_train_base_missfunc_200.parquet
 !data/bfcl_train_200.parquet
 !data/bfcl_test_600.parquet
 !data/bfcl_train_400.parquet
+# NOTE: bfcl_test_400.parquet is a deprecated train/test-mixed stub; do not reuse.
 !data/bfcl_test_400.parquet
 
 # Local resources and scripts
