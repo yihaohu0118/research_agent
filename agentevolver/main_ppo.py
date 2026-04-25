@@ -29,6 +29,7 @@ from agentevolver.module.tocf.sampler import AdaptiveMixtureStrategy
 
 import os
 import json
+import tempfile
 import hydra
 import ray
 
@@ -38,6 +39,25 @@ from verl.trainer.ppo.reward import load_reward_manager
 from agentevolver.module.trainer.ae_ray_trainer import AgentEvolverRayPPOTrainer
 
 from verl.trainer.ppo import core_algos
+
+
+def _sanitize_ray_temp_env() -> None:
+    """Drop invalid temp-dir environment overrides before Ray reads them."""
+    changed = False
+    for key in ("RAY_TMPDIR", "TMPDIR", "TEMP", "TMP"):
+        path = os.environ.get(key)
+        if not path:
+            continue
+        try:
+            os.makedirs(path, exist_ok=True)
+            if not os.access(path, os.W_OK | os.X_OK):
+                raise PermissionError(f"{path!r} is not writable")
+        except OSError as exc:
+            print(f"WARNING: ignoring {key}={path!r}: {exc}", flush=True)
+            os.environ.pop(key, None)
+            changed = True
+    if changed:
+        tempfile.tempdir = None
 
 
 def _ray_system_config_from_env() -> dict:
@@ -214,6 +234,7 @@ def run_ppo(config) -> None:
         None
     """
     if not ray.is_initialized():
+        _sanitize_ray_temp_env()
         # this is for local ray cluster
         ray.init(
             runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN", "VLLM_LOGGING_LEVEL": "WARN",
