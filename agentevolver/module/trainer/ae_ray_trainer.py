@@ -894,7 +894,7 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
         metrics.update(self.evolved_task_bank.metrics())
         return metrics
 
-    def _finalize_tocf_epoch(self, epoch: int | str) -> None:
+    def _finalize_tocf_epoch(self, epoch: int | str, tracking_logger=None) -> None:
         if self.tocf_stats is not None:
             if self.tocf_stats_metrics_enabled:
                 self.tocf_stats.dump(f"epoch_{epoch}.json")
@@ -905,10 +905,14 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                 )
                 if decision is not None and decision.accepted:
                     self.train_dataset.apply_tocf_patches(decision)
-                logger.log(data=self.tocf_controller.metrics(), step=self.global_steps)
+                metrics = self.tocf_controller.metrics()
+                if tracking_logger is not None and metrics:
+                    tracking_logger.log(data=metrics, step=self.global_steps)
 
         if self.evolved_task_bank is not None:
-            logger.log(data=self._run_coevo_epoch(epoch), step=self.global_steps)
+            metrics = self._run_coevo_epoch(epoch)
+            if tracking_logger is not None and metrics:
+                tracking_logger.log(data=metrics, step=self.global_steps)
 
         if self.tocf_stats is not None:
             self.tocf_stats.reset_window()
@@ -1957,7 +1961,7 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                 progress_bar.update(1)
                 self.global_steps += 1
                 if is_last_step:
-                    self._finalize_tocf_epoch(epoch)
+                    self._finalize_tocf_epoch(epoch, tracking_logger=logger)
                     pprint(f"Final validation metrics: {last_val_metrics}")
                     progress_bar.close()
                     return
@@ -1971,5 +1975,5 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                 assert isinstance(self.train_dataset._mixture_strategy,UnifiedMixtureStrategy)
                 self.train_dataset._mixture_strategy._synthetic_ratio-=1/5 # initial 1, 0 at about epoch 5 (about step 30)
 
-            self._finalize_tocf_epoch(epoch)
+            self._finalize_tocf_epoch(epoch, tracking_logger=logger)
             self.train_dataset.update()  # ⭐ Update the training dataset for the next iteration
