@@ -207,16 +207,12 @@ def run_ppo(config) -> None:
         None
     """
     if not ray.is_initialized():
-        ray_tmp_dir = os.environ.get("RAY_TMPDIR")
-        if ray_tmp_dir:
-            os.makedirs(ray_tmp_dir, exist_ok=True)
         # this is for local ray cluster
         ray.init(
             runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN", "VLLM_LOGGING_LEVEL": "WARN",
              "VLLM_ALLOW_RUNTIME_LORA_UPDATING": "true", "VLLM_USE_V1": "1", "WANDB_API_KEY": "local-e93291bd40698a593a1fcc5b99da6a71a753a383",
              "WANDB_BASE_URL": "http://22.6.186.25:8080"}},
             num_cpus=config.ray_init.num_cpus,
-            _temp_dir=ray_tmp_dir,
             _system_config=_ray_system_config_from_env(),
         )  # ⭐ Initialize the Ray cluster with the specified runtime environment and number of CPUs
 
