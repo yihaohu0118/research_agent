@@ -25,6 +25,10 @@ import uuid
 from env_service.base import BaseEnv
 from env_service.registry import Registry
 from env_service.trajectory import StateMessage, ActionMessage, ToolCall
+from agentevolver.module.tocf.bfcl_synthetic import (
+    materialize_bfcl_synthetic_case,
+    write_materialized_bfcl_synthetic_case,
+)
 
 
 # 默认路径，可用环境变量覆盖
@@ -306,6 +310,7 @@ class BfclEnv(BaseEnv):
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.tools_info = ""
+        self.synthetic_case_overlay: Dict[str, Any] | None = None
 
     # ------------------------------------------------------------------ #
     # 生命周期
@@ -315,6 +320,7 @@ class BfclEnv(BaseEnv):
         if params:
             self.params.update(params)
         self.test_entry = self._load_test_case(self.data_path, self.task_id)
+        self.test_entry = self._apply_synthetic_case_overlay(self.test_entry)
         self.original_test_entry = self.test_entry
 
         # 必须成功实例化真实 EnvHandler
@@ -363,6 +369,10 @@ class BfclEnv(BaseEnv):
                 "test_id": self.test_entry.get("id", "unknown"),
                 "tools_count": len(tools),
                 "questions_count": len(self.original_test_entry.get("question", [])),
+                "synthetic_case_overlay": bool(self.synthetic_case_overlay),
+                "synthetic_objective_hash": (
+                    self.synthetic_case_overlay or {}
+                ).get("objective_hash"),
             },
         }
 
@@ -547,6 +557,49 @@ class BfclEnv(BaseEnv):
                     if data.get("id") == test_id:
                         return data
                 raise ValueError(f"Test case id '{test_id}' not found in {data_path}")
+
+    def _apply_synthetic_case_overlay(self, test_entry: Dict[str, Any]) -> Dict[str, Any]:
+        overlay = self.params.get("synthetic_case_overlay")
+        if not isinstance(overlay, dict):
+            self.synthetic_case_overlay = None
+            return test_entry
+
+        question = overlay.get("question")
+        if not isinstance(question, list) or not question:
+            raise ValueError("synthetic_case_overlay.question must be a non-empty list")
+
+        normalized_question: list[list[Dict[str, Any]]] = []
+        for turn in question:
+            if not isinstance(turn, list) or not turn:
+                raise ValueError("synthetic_case_overlay.question turns must be non-empty lists")
+            normalized_turn: list[Dict[str, Any]] = []
+            for message in turn:
+                if not isinstance(message, dict):
+                    raise ValueError("synthetic_case_overlay.question messages must be objects")
+                role = message.get("role")
+                content = message.get("content")
+                if role != "user" or not isinstance(content, str) or not content.strip():
+                    raise ValueError(
+                        "synthetic_case_overlay.question currently supports user messages only"
+                    )
+                normalized_turn.append({"role": "user", "content": content})
+            normalized_question.append(normalized_turn)
+
+        overlay = dict(overlay)
+        overlay["question"] = normalized_question
+        overlaid, possible_answer = materialize_bfcl_synthetic_case(test_entry, overlay)
+        if isinstance(overlaid.get("metadata"), dict):
+            overlaid["metadata"]["synthetic_possible_answer"] = possible_answer
+            materialize_dir = self.params.get("synthetic_materialize_dir")
+            if materialize_dir:
+                files = write_materialized_bfcl_synthetic_case(
+                    overlaid,
+                    possible_answer,
+                    materialize_dir,
+                )
+                overlaid["metadata"]["synthetic_case_overlay"]["materialized_files"] = files
+        self.synthetic_case_overlay = overlay
+        return overlaid
 
     # 静态接口给 env_service 用
     @staticmethod

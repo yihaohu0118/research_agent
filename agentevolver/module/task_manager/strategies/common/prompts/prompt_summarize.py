@@ -62,6 +62,11 @@ For each identified task, output exactly one block in this format:
 }
 </task>
 
+For BFCL/function-calling tasks only, you may add these fields inside the same JSON object:
+- "question_schedule": ["first user request", "second user request", ...] when the solution is multi-turn. The first item must exactly equal "query"; the number of items must match the number of # step blocks in action_sequence.
+- "semantic_rationale": a short explanation of why the query requires exactly the provided action_sequence.
+- "environment_constraints": concrete entities/files/objects from the observed environment that the task depends on.
+
 ---
 
 # GOOD EXAMPLES
@@ -185,6 +190,19 @@ def parse_tasks_from_response(task: Task, response: str) -> list[TaskObjective]:
             current_task = task.copy(deep=True)
             current_task.query = t["query"]
             current_task.open_query = True
+            metadata = dict(current_task.metadata or {})
+            bfcl_meta = dict((metadata.get("tocf") or {}).get("bfcl_synthetic") or {})
+            if "question_schedule" in t:
+                metadata["bfcl_synthetic_question_schedule"] = t["question_schedule"]
+                bfcl_meta["question_schedule"] = t["question_schedule"]
+            for key in ("semantic_rationale", "environment_constraints", "expected_final_response"):
+                if key in t:
+                    bfcl_meta[key] = t[key]
+            if bfcl_meta:
+                tocf_meta = dict(metadata.get("tocf") or {})
+                tocf_meta["bfcl_synthetic"] = bfcl_meta
+                metadata["tocf"] = tocf_meta
+                current_task.metadata = metadata
             x=TaskObjective(
                 task=current_task,
                 confidence=t["confidence"],

@@ -497,12 +497,15 @@ def ingest_from_trajectories(
         if not category:
             continue
 
-        success = getattr(traj, "success", False)
         task_id = meta.get("task_id") or getattr(traj, "data_id", "")
-        reward = float(getattr(getattr(traj, "reward", None), "outcome", 0.0) or 0.0)
+        reward_obj = getattr(traj, "reward", None)
+        reward = float(getattr(reward_obj, "outcome", 0.0) or 0.0)
+        success_rate = float(getattr(reward_obj, "success_rate", 0.0) or 0.0)
         reward_meta = (
-            getattr(getattr(traj, "reward", None), "metadata", None) or {}
+            getattr(reward_obj, "metadata", None) or {}
         )
+        raw_accuracy = float(reward_meta.get("bfcl_dense_raw_accuracy", 0.0) or 0.0)
+        success = bool(success_rate >= 1.0 or reward >= 1.0 or raw_accuracy >= 1.0)
         progress_info = reward_meta.get("bfcl_dense_progress_info", {}) or {}
         failure_tags = list(progress_info.get("failure_tags") or [])
         tag = dominant_failure_tag(failure_tags)

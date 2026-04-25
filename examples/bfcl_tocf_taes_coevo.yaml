@@ -19,6 +19,10 @@ trainer:
   project_name: bfcl_tocf_taes_coevo
   experiment_name: bfcl_taes_coevo_grpo_official_split
 
+env_service:
+  bfcl:
+    synthetic_materialize_dir: experiments/bfcl_tocf_taes_coevo/bfcl_synthetic_cases
+
 tocf:
   persistence_dir: experiments/bfcl_tocf_taes_coevo/tocf_state
 
@@ -31,6 +35,13 @@ tocf:
   coevo:
     enable: true
     generate_every_n_epochs: 1
+    rollouts_per_parent: 1
+    bfcl_synthetic_grader: bfcl-synthetic-env
+    require_executable_gt: true
+    require_semantic_alignment: true
+    min_semantic_score: 0.34
+    validate_bfcl_gt_before_accept: true
+    replay_gt_before_reward: true
     max_seed_tasks: 8
     max_new_tasks_per_epoch: 24
     max_total_tasks: 192
@@ -46,5 +57,5 @@ tocf:
     selection_alpha: 0.75
     selection_max_weight: 2.5
     category_fallback: true
-    mix_ratio: 0.25
+    mix_ratio: 0.10
     retire_after_epochs: 4

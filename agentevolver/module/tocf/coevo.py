@@ -7,6 +7,13 @@ from dataclasses import dataclass
 from typing import Any, Sequence
 
 from agentevolver.module.tocf.category import infer_task_category, patch_task_metadata
+from agentevolver.module.tocf.bfcl_synthetic import (
+    build_bfcl_synthetic_case_overlay,
+    normalize_tool_turns,
+    serialize_tool_turns,
+    tool_turns_to_strings,
+    validate_bfcl_synthetic_alignment,
+)
 from agentevolver.module.tocf.state import (
     EXCLUDED_FAILURE_TAGS,
     PASS_TAG,
@@ -223,7 +230,7 @@ def coevo_guidance_for_task(task: Task | None) -> str:
 
     source = str(coevo.get("source") or "task")
     pressure = _safe_float(coevo.get("pressure"), 0.0)
-    return (
+    guidance_text = (
         "# Co-Evolution Target\n"
         "You are generating targeted task variants for training.\n"
         f"- Keep the task in the same capability family/category: `{category}`.\n"
@@ -234,12 +241,27 @@ def coevo_guidance_for_task(task: Task | None) -> str:
         "- Prefer a harder variant over a simple paraphrase.\n"
         "- Preserve the same environment/tool family instead of inventing unrelated capabilities.\n"
     )
+    if task.env_type == "bfcl":
+        guidance_text += (
+            "\n# BFCL Synthetic Case Contract\n"
+            "- Generate a task that can be solved using the SAME available BFCL tools/state as the seed case.\n"
+            "- Do not invent new files, APIs, tools, classes, accounts, or database rows that were not visible in the interaction history.\n"
+            "- The `action_sequence` must be executable BFCL tool calls, grouped with `# step0`, `# step1`, ... when there are multiple user turns.\n"
+            "- If the task needs multiple user turns, include `question_schedule` in the JSON: an array of user utterances, one per step. "
+            "The first item must exactly match `query`, and the number of items must equal the number of `# step` blocks.\n"
+            "- Make the query semantically anchor the GT: mention the operation intent or concrete entities/filenames/values used by the tool calls.\n"
+        )
+    return guidance_text
 
 
 def finalize_coevo_objectives(
     objectives: Sequence[TaskObjective],
     *,
     synthetic_grader: str,
+    bfcl_synthetic_grader: str | None = None,
+    require_executable_gt: bool = True,
+    require_semantic_alignment: bool = True,
+    min_semantic_score: float = 0.34,
     epoch: int | str | None,
 ) -> list[TaskObjective]:
     finalized: list[TaskObjective] = []
@@ -248,7 +270,47 @@ def finalize_coevo_objectives(
             continue
         cleaned = copy.deepcopy(objective)
         cleaned.task.open_query = True
-        cleaned.task.evaluator = synthetic_grader
+        evaluator = synthetic_grader
+        normalized_gt = None
+        if cleaned.task.env_type == "bfcl" and bfcl_synthetic_grader:
+            normalized_gt = normalize_tool_turns(cleaned.ground_truth)
+            if require_executable_gt and not normalized_gt:
+                continue
+            if normalized_gt:
+                overlay, overlay_reason = build_bfcl_synthetic_case_overlay(
+                    task_id=str(cleaned.task.task_id),
+                    query=cleaned.task.query,
+                    ground_truth=cleaned.ground_truth,
+                    metadata=cleaned.task.metadata,
+                    turns=normalized_gt,
+                )
+                if require_executable_gt and overlay is None:
+                    continue
+                semantic_alignment = validate_bfcl_synthetic_alignment(
+                    cleaned.task.query,
+                    normalized_gt,
+                    cleaned.task.metadata,
+                    min_score=min_semantic_score,
+                )
+                if require_semantic_alignment and not bool(semantic_alignment["ok"]):
+                    continue
+                evaluator = bfcl_synthetic_grader
+                if overlay:
+                    cleaned.task.open_query = bool(len(overlay.get("question") or []) <= 1)
+                cleaned.ground_truth = serialize_tool_turns(normalized_gt)
+            else:
+                overlay = None
+                overlay_reason = "synthetic_gt_unparseable"
+                semantic_alignment = {
+                    "ok": False,
+                    "score": 0.0,
+                    "reason": "synthetic_gt_unparseable",
+                }
+        else:
+            overlay = None
+            overlay_reason = "not_bfcl_synthetic"
+            semantic_alignment = {"ok": True, "score": 1.0, "reason": "not_bfcl_synthetic"}
+        cleaned.task.evaluator = evaluator
         metadata = patch_task_metadata(
             cleaned.task.metadata,
             task_id=cleaned.task.task_id,
@@ -261,10 +323,22 @@ def finalize_coevo_objectives(
         coevo_meta["parent_task_id"] = str(coevo_meta.get("parent_task_id") or cleaned.task.task_id)
         coevo_meta["target_tag"] = str(coevo_meta.get("target_tag") or UNKNOWN_TAG)
         coevo_meta["evolution_epoch"] = epoch
-        coevo_meta["objective_hash"] = hashlib.sha1(
-            str(cleaned.task.query or "").encode("utf-8")
-        ).hexdigest()[:12]
+        coevo_meta["verifier"] = evaluator
+        coevo_meta["gt_parseable"] = bool(normalized_gt)
+        coevo_meta["gt_executable"] = False
+        coevo_meta["overlay_ready"] = bool(overlay)
+        coevo_meta["overlay_reason"] = overlay_reason
+        coevo_meta["semantic_alignment"] = semantic_alignment
+        if normalized_gt and evaluator == bfcl_synthetic_grader:
+            coevo_meta["gt_execution_check"] = "reward_time_env_replay"
+        coevo_meta["objective_hash"] = (
+            str(overlay.get("objective_hash"))
+            if overlay and overlay.get("objective_hash")
+            else hashlib.sha1(str(cleaned.task.query or "").encode("utf-8")).hexdigest()[:12]
+        )
         tocf_meta["coevo"] = coevo_meta
+        if normalized_gt:
+            tocf_meta["bfcl_synthetic_gt"] = tool_turns_to_strings(normalized_gt)
         metadata["tocf"] = tocf_meta
         cleaned.task.metadata = metadata
         finalized.append(cleaned)

@@ -581,7 +581,11 @@ def update_bandit_from_trajectories(
             capability_state,
         )
 
-        success = bool(getattr(traj, "success", False))
+        reward_obj = getattr(traj, "reward", None)
+        reward = float(getattr(reward_obj, "outcome", 0.0) or 0.0)
+        success_rate = float(getattr(reward_obj, "success_rate", 0.0) or 0.0)
+        raw_accuracy = float(reward_meta.get("bfcl_dense_raw_accuracy", 0.0) or 0.0)
+        success = bool(success_rate >= 1.0 or reward >= 1.0 or raw_accuracy >= 1.0)
 
         if strategy_id:
             bandit.update(category, prior_tag, strategy_id, success)

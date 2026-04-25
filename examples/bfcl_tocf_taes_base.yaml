@@ -62,11 +62,9 @@ tocf:
   feedback:
     dense_reward:
       enable: true
-      mode: capped
-      partial_credit_cap: 0.0
-      partial_credit_weight: 1.0
-      cap_decay: false
-      min_cap: 0.0
+      mode: t3rl
+      irrelevance_weight: 0.5
+      scorable_floor: false
 
   advantage:
     apatch:

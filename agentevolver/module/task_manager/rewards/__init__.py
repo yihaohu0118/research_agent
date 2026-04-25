@@ -94,6 +94,7 @@ from .binary_judge_gt import LlmAsJudgeBinaryRewardCalculatorWithGT
 from .avg_judge import AvgBinaryGTJudge,AvgLlmJudge
 from .env_grader import EnvGrader
 from .bfcl_dense_env_grader import BfclDenseEnvGrader
+from .bfcl_synthetic_env_grader import BfclSyntheticEnvGrader
 
 __all__=[
     "LlmAsJudgeRewardCalculatorWithGT",
@@ -104,5 +105,6 @@ __all__=[
     "AvgLlmJudge",
     "EnvGrader",
     "BfclDenseEnvGrader",
+    "BfclSyntheticEnvGrader",
     "grader_manager"
 ]

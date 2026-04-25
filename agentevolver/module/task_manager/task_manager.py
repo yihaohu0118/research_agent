@@ -207,7 +207,14 @@ class TaskManager(object):
         combined_str = "|".join(task_strs)
         return hashlib.md5(combined_str.encode()).hexdigest()  # ⭐ Compute the MD5 hash of the combined string
 
-    def generate_task(self, tasks: Sequence[Task], *, show_progress=False, resume_file: Optional[str] = None) -> list[TaskObjective]:
+    def generate_task(
+        self,
+        tasks: Sequence[Task],
+        *,
+        show_progress=False,
+        resume_file: Optional[str] = None,
+        n_rollouts: Optional[int] = None,
+    ) -> list[TaskObjective]:
         """
         Generates task objectives by exploring and summarizing tasks, with support for resuming from a checkpoint and applying filters.
 
@@ -215,6 +222,9 @@ class TaskManager(object):
             tasks (Sequence[Task]): A sequence of Task objects.
             show_progress (bool): Whether to show a progress bar.
             resume_file (Optional[str]): The path to the resume file. If not provided, a default file is used.
+            n_rollouts (Optional[int]): Override how many exploration rollouts to run per seed task.
+                This lets co-evolution generate candidates even when normal synthetic task generation
+                is disabled with task_manager.n = 0.
 
         Returns:
             list[TaskObjective]: A list of generated TaskObjective objects.
@@ -242,8 +252,14 @@ class TaskManager(object):
             except Exception as e:
                 logger.warning(f"Failed to load checkpoint: {e}, starting from scratch")
 
+        rollout_n = self._n if n_rollouts is None else max(0, int(n_rollouts))
+        if rollout_n <= 0:
+            logger.warning("generate_task called with n_rollouts <= 0; no candidate tasks will be generated.")
+
         # we roll n times for each task
-        task_q = list(copy.copy(tasks)) * self._n
+        task_q = list(copy.copy(tasks)) * rollout_n
+        if not task_q:
+            return res
 
         # in each batch, we explore all different tasks or max_threads tasks, in order to avoid generating same task.
         parallel_num = min(self._num_exploration_threads, len(tasks))

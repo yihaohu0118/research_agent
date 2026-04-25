@@ -532,15 +532,24 @@ class EnvHandler:
                     handler, model_result_data, prompt_data, model_name, category
                 )
             else:
-                # Find the corresponding possible answer file
-
-                possible_answer_file = find_file_by_category(
-                    category, self._answer_path
+                synthetic_possible_answer = (
+                    (original_test_entry.get("metadata") or {}).get(
+                        "synthetic_possible_answer"
+                    )
+                    if isinstance(original_test_entry.get("metadata"), dict)
+                    else None
                 )
-                possible_answer = load_file(possible_answer_file, sort_by_id=True)
-                possible_answer = [
-                    item for item in possible_answer if item["id"] == test_id
-                ]
+                if isinstance(synthetic_possible_answer, dict):
+                    possible_answer = [synthetic_possible_answer]
+                else:
+                    # Find the corresponding possible answer file
+                    possible_answer_file = find_file_by_category(
+                        category, self._answer_path
+                    )
+                    possible_answer = load_file(possible_answer_file, sort_by_id=True)
+                    possible_answer = [
+                        item for item in possible_answer if item["id"] == test_id
+                    ]
                 if is_multi_turn(category):
                     accuracy, total_count = self._eval_multi_turn_test(
                         handler,
