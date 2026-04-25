@@ -50,13 +50,20 @@ def _ray_system_config_from_env() -> dict:
 
     spill_dir = os.environ.get("RAY_OBJECT_SPILL_DIR")
     if spill_dir:
-        os.makedirs(spill_dir, exist_ok=True)
-        system_config["object_spilling_config"] = json.dumps(
-            {
-                "type": "filesystem",
-                "params": {"directory_path": spill_dir},
-            }
-        )
+        try:
+            os.makedirs(spill_dir, exist_ok=True)
+        except OSError as exc:
+            print(
+                f"WARNING: ignoring RAY_OBJECT_SPILL_DIR={spill_dir!r}: {exc}",
+                flush=True,
+            )
+        else:
+            system_config["object_spilling_config"] = json.dumps(
+                {
+                    "type": "filesystem",
+                    "params": {"directory_path": spill_dir},
+                }
+            )
 
     return system_config
 
