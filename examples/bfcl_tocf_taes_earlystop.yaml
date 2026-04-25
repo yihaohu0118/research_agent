@@ -1,0 +1,35 @@
+# Early-stop TOCF variant.
+#
+# Motivation:
+#   Initial validation curves show that TAES can peak before the final step and
+#   then regress. This config caps training around the observed high-performing
+#   region while still keeping best-checkpoint selection enabled.
+
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
+defaults:
+  - bfcl_tocf_taes_base
+  - _self_
+
+trainer:
+  project_name: bfcl_tocf_taes_earlystop
+  experiment_name: bfcl_taes_earlystop_grpo_official_split
+  total_training_steps: 80
+  test_freq: 10
+  save_best_checkpoint: true
+  keep_only_best_checkpoint: true
+
+tocf:
+  persistence_dir: experiments/bfcl_tocf_taes_earlystop/tocf_state
+
+  state:
+    dir: experiments/bfcl_tocf_taes_earlystop/tocf_state
+
+  stats:
+    dump_dir: experiments/bfcl_tocf_taes_earlystop/tocf_stats
+
+  coevo:
+    enable: false

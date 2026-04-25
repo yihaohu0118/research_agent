@@ -30,6 +30,9 @@ tocf:
     enable: true
     dump_dir: experiments/bfcl_tocf_taes/tocf_stats
 
+  coevo:
+    enable: false
+
   task_distribution:
     enable: true
     category_weights:
