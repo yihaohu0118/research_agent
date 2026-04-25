@@ -22,6 +22,7 @@
 #   SKIP_GENERATE   - Set to 1 to skip generation and only evaluate
 #   SKIP_EVALUATE   - Set to 1 to skip evaluation and only generate
 #   BFCL_ROOT       - Path to berkeley-function-call-leaderboard root
+#   SUBSET_PARQUET  - Optional parquet whose BFCL ids define a reporting subset
 # =============================================================================
 set -euo pipefail
 
@@ -78,6 +79,7 @@ SKIP_GENERATE="${SKIP_GENERATE:-0}"
 SKIP_EVALUATE="${SKIP_EVALUATE:-0}"
 RESULT_DIR="${RESULT_DIR:-${BFCL_ROOT_RESOLVED}/result}"
 SCORE_DIR="${SCORE_DIR:-${BFCL_ROOT_RESOLVED}/score}"
+SUBSET_PARQUET="${SUBSET_PARQUET:-}"
 
 echo "============================================"
 echo "  BFCL Multi-Turn Evaluation"
@@ -93,6 +95,9 @@ echo "Temperature:    ${TEMPERATURE}"
 echo "Test category:  ${TEST_CATEGORY}"
 echo "Result dir:     ${RESULT_DIR}"
 echo "Score dir:      ${SCORE_DIR}"
+if [[ -n "${SUBSET_PARQUET}" ]]; then
+    echo "Subset parquet: ${SUBSET_PARQUET}"
+fi
 echo "============================================"
 
 if [[ ! -d "${MODEL_PATH}" ]]; then
@@ -174,6 +179,15 @@ elif isinstance(data, list):
 "
             fi
         done
+    fi
+
+    if [[ -n "${SUBSET_PARQUET}" ]]; then
+        echo ""
+        echo "[Step 2/2] Summarizing official scores on subset..."
+        python3 "${PROJECT_ROOT}/tools/bfcl_subset_score.py" \
+            --parquet "${SUBSET_PARQUET}" \
+            --score-dir "${SCORE_DIR}" \
+            --model-name "${MODEL_NAME}"
     fi
 else
     echo ""
