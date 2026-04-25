@@ -1,0 +1,60 @@
+# TOCF + co-evolution without environment-grounded verification.
+#
+# This ablation keeps the same synthetic BFCL generation loop as the full
+# coevo config, but disables the semantic alignment and GT replay gates. It is
+# meant to test whether gains come from merely adding synthetic tasks or from
+# the environment-grounded verification used by the full method.
+
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
+defaults:
+  - bfcl_tocf_taes_base
+  - _self_
+
+trainer:
+  project_name: bfcl_tocf_taes_coevo_unverified
+  experiment_name: bfcl_taes_coevo_unverified_grpo_official_split
+
+env_service:
+  bfcl:
+    synthetic_materialize_dir: experiments/bfcl_tocf_taes_coevo_unverified/bfcl_synthetic_cases
+
+tocf:
+  persistence_dir: experiments/bfcl_tocf_taes_coevo_unverified/tocf_state
+
+  state:
+    dir: experiments/bfcl_tocf_taes_coevo_unverified/tocf_state
+
+  stats:
+    dump_dir: experiments/bfcl_tocf_taes_coevo_unverified/tocf_stats
+
+  coevo:
+    enable: true
+    generate_every_n_epochs: 1
+    rollouts_per_parent: 1
+    bfcl_synthetic_grader: bfcl-synthetic-env
+    require_executable_gt: false
+    require_semantic_alignment: false
+    min_semantic_score: 0.34
+    validate_bfcl_gt_before_accept: false
+    replay_gt_before_reward: false
+    max_seed_tasks: 8
+    max_new_tasks_per_epoch: 24
+    max_total_tasks: 192
+    max_per_parent: 8
+    min_task_observations: 2
+    min_samples: 4
+    min_task_weight: 1.05
+    min_confidence: 0.45
+    min_query_chars: 24
+    min_query_tokens: 5
+    max_query_similarity: 0.9
+    max_jaccard_similarity: 0.8
+    selection_alpha: 0.75
+    selection_max_weight: 2.5
+    category_fallback: true
+    mix_ratio: 0.10
+    retire_after_epochs: 4

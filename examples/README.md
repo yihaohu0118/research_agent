@@ -10,6 +10,7 @@ the minimal experiment matrix for testing environment/model co-evolution.
 | `bfcl_grpo.yaml` | Baseline | Vanilla BFCL GRPO, no TOCF adaptation, no co-evolution. |
 | `bfcl_tocf_taes.yaml` | TOCF without coevo | Task/advantage/experience/strategy adaptation from environment feedback. |
 | `bfcl_tocf_taes_coevo.yaml` | Full idea | TOCF + coevolution, with synthetic BFCL cases materialized and GT replay-verified. |
+| `bfcl_tocf_taes_coevo_unverified.yaml` | Coevo ablation | Same synthetic generation loop, but without semantic alignment or GT replay gates. |
 
 ## Base Configs
 
@@ -27,7 +28,11 @@ directly:
 2. `bfcl_tocf_taes.yaml` vs `bfcl_tocf_taes_coevo.yaml`
    Measures whether co-evolved, executable synthetic BFCL cases add value.
 
-3. Inspect `experiments/bfcl_tocf_taes_coevo/bfcl_synthetic_cases`
+3. `bfcl_tocf_taes_coevo_unverified.yaml` vs `bfcl_tocf_taes_coevo.yaml`
+   Measures whether environment-grounded verification is better than simply
+   adding synthetic BFCL tasks.
+
+4. Inspect `experiments/bfcl_tocf_taes_coevo/bfcl_synthetic_cases`
    Confirms that coevo produced materialized synthetic BFCL cases and
    possible-answer entries rather than only runtime prompt overlays.
 
