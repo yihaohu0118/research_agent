@@ -78,7 +78,7 @@ actor_rollout_ref:
     kl_loss_type: low_var_kl
     clip_ratio: 0.2
     clip_ratio_low: 0.2
-    clip_ratio_high: 0.2
+    clip_ratio_high: 0.28
     off_cliprange_high: 1.0
     clip_ratio_c: 10.0
     grad_clip: 1.0
@@ -129,11 +129,11 @@ trainer:
   project_name: "bfcl_grpo_baseline"
   experiment_name: "bfcl_grpo_baseline"
   save_freq: 0
-  save_best_checkpoint: false
+  save_best_checkpoint: true
   keep_only_best_checkpoint: true
   save_limit: 0
   test_freq: 10
-  total_epochs: 10
+  total_epochs: 5
   val_before_train: true
   val_only: false
 
