@@ -1,0 +1,42 @@
+# A3-Patch: abstention-aware advantage adaptation.
+#
+# Motivation:
+#   multi_turn_miss_func requires learning when not to call tools. This config
+#   increases optimization pressure on spurious tool calls and correct
+#   abstention without adding prompt-time memory or strategy text.
+
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
+defaults:
+  - bfcl_tocf_ta_conservative
+  - _self_
+
+trainer:
+  project_name: bfcl_tocf_ta_a3
+  experiment_name: bfcl_ta_a3_grpo_official_split
+
+tocf:
+  persistence_dir: experiments/bfcl_tocf_ta_a3/tocf_state
+
+  state:
+    dir: experiments/bfcl_tocf_ta_a3/tocf_state
+
+  stats:
+    dump_dir: experiments/bfcl_tocf_ta_a3/tocf_stats
+
+  advantage:
+    apatch:
+      min_scale: 0.8
+      max_scale: 1.6
+      warmup_steps: 30
+      tag_weights:
+        spurious_tool_call: 3.0
+        correct_abstention: 2.5
+        empty_turn_model_response: 1.5
+        state_mismatch: 1.0
+        response_mismatch: 0.9
+        instance_mismatch: 0.6
+        pass: 1.0

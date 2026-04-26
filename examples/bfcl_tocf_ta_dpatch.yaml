@@ -1,0 +1,34 @@
+# D-Patch: tool-affordance discipline.
+#
+# Motivation:
+#   Instead of injecting long memories or dynamic strategies, this config adds
+#   a short train-time rule that makes the tool-use/abstention boundary
+#   explicit. Validation remains unpatched so the score reflects learned
+#   behavior, not an evaluation-time hint.
+
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
+defaults:
+  - bfcl_tocf_ta_conservative
+  - _self_
+
+trainer:
+  project_name: bfcl_tocf_ta_dpatch
+  experiment_name: bfcl_ta_dpatch_grpo_official_split
+
+tocf:
+  persistence_dir: experiments/bfcl_tocf_ta_dpatch/tocf_state
+
+  state:
+    dir: experiments/bfcl_tocf_ta_dpatch/tocf_state
+
+  stats:
+    dump_dir: experiments/bfcl_tocf_ta_dpatch/tocf_stats
+
+  query_suffix:
+    enable: true
+    apply_to_validation: false
+    suffix: "Only call a tool when an available function directly supports the user's request. If no available function can perform the requested operation, do not call any tool and answer directly."
