@@ -11,7 +11,7 @@ hydra:
     - file://config
 
 defaults:
-  - bfcl_tocf_ta_conservative
+  - bfcl_tocf_taes_base
   - _self_
 
 trainer:
@@ -27,6 +27,9 @@ tocf:
   stats:
     dump_dir: experiments/bfcl_tocf_ta_hardcats/tocf_stats
 
+  coevo:
+    enable: false
+
   task_distribution:
     category_weights:
       multi_turn_base: 0.75
@@ -35,3 +38,15 @@ tocf:
       multi_turn_long_context: 1.3
     min_weight: 0.8
     max_weight: 1.8
+
+  advantage:
+    apatch:
+      min_scale: 0.8
+      max_scale: 1.3
+      warmup_steps: 30
+
+  self_evolution:
+    enable: false
+
+  strategy:
+    enable: false

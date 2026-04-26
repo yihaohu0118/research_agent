@@ -11,7 +11,7 @@ hydra:
     - file://config
 
 defaults:
-  - bfcl_tocf_ta_conservative
+  - bfcl_tocf_taes_base
   - _self_
 
 trainer:
@@ -26,6 +26,9 @@ tocf:
 
   stats:
     dump_dir: experiments/bfcl_tocf_ta_combo/tocf_stats
+
+  coevo:
+    enable: false
 
   task_distribution:
     category_weights:
@@ -54,3 +57,9 @@ tocf:
     enable: true
     apply_to_validation: false
     suffix: "Only call a tool when an available function directly supports the user's request. If no available function can perform the requested operation, do not call any tool and answer directly."
+
+  self_evolution:
+    enable: false
+
+  strategy:
+    enable: false

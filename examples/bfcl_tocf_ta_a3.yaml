@@ -11,7 +11,7 @@ hydra:
     - file://config
 
 defaults:
-  - bfcl_tocf_ta_conservative
+  - bfcl_tocf_taes_base
   - _self_
 
 trainer:
@@ -27,6 +27,9 @@ tocf:
   stats:
     dump_dir: experiments/bfcl_tocf_ta_a3/tocf_stats
 
+  coevo:
+    enable: false
+
   advantage:
     apatch:
       min_scale: 0.8
@@ -40,3 +43,9 @@ tocf:
         response_mismatch: 0.9
         instance_mismatch: 0.6
         pass: 1.0
+
+  self_evolution:
+    enable: false
+
+  strategy:
+    enable: false
