@@ -1,0 +1,18 @@
+# Strict T-Patch ablation: GRPO + adaptive task exposure only.
+# Reward remains binary through bfcl_tocf_taes_base.
+
+defaults:
+  - bfcl_tocf_taes_base
+  - _self_
+
+trainer:
+  experiment_name: bfcl_grpo_tpatch
+
+tocf:
+  persistence_dir: experiments/bfcl_grpo_module_ablation/tpatch/tocf_state
+  state:
+    dir: experiments/bfcl_grpo_module_ablation/tpatch/tocf_state
+  stats:
+    dump_dir: experiments/bfcl_grpo_module_ablation/tpatch/tocf_stats
+  task_distribution:
+    enable: true

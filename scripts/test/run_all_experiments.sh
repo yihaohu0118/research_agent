@@ -2,7 +2,7 @@
 # Run selected experiment configs under examples/ (not every YAML file).
 #
 # Suites:
-#   core     — AppWorld (basic, overall) + full BFCL ablation ladder
+#   core     — AppWorld (basic, overall) + BFCL module ablation ladder
 #   appworld — basic + overall only
 #   bfcl     — BFCL baseline + ablations only (see BFCL_EXPERIMENTS below)
 #
@@ -429,20 +429,14 @@ APPWORLD_EXPERIMENTS=(
   "overall|appworld,reme|"
 )
 
-# BFCL ablation ladder (same official BFCL train/test split for all rows; same
-# universal hyperparameters lr=1e-6, entropy_coeff=0, total_epochs=10,
-# temperature=1.0, strict_tool_parser=true across every row):
-#   bfcl_grpo        — pure GRPO, no TOCF patches
-#   bfcl_tocf_tpatch — isolated T-Patch (per-category task sampling) ablation
-#   bfcl_tocf_apatch — isolated A-Patch (tag-aware advantage weighting) ablation
-#   bfcl_tocf_coevo — GRPO + A + E + S (cold-start co-evolution)
-#   bfcl_tocf_ae    — GRPO + A + E only (cold-start; pair with coevo for Δ_S)
+# BFCL strict module attribution ladder: baseline, diagnostic control,
+# then one-module T/A rows. E/S/full TAES and synthetic task generation are
+# intentionally out of this active suite.
 BFCL_EXPERIMENTS=(
-  "bfcl_grpo|bfcl|data/bfcl_train.parquet,data/bfcl_test.parquet"
-  "bfcl_tocf_tpatch|bfcl|data/bfcl_train.parquet,data/bfcl_test.parquet"
-  "bfcl_tocf_apatch|bfcl|data/bfcl_train.parquet,data/bfcl_test.parquet"
-  "bfcl_tocf_coevo|bfcl|data/bfcl_train.parquet,data/bfcl_test.parquet"
-  "bfcl_tocf_ae|bfcl|data/bfcl_train.parquet,data/bfcl_test.parquet"
+  "bfcl_grpo|bfcl|data/bfcl_train.parquet,data/bfcl_eval_400.parquet"
+  "bfcl_tocf_taes_base|bfcl|data/bfcl_train.parquet,data/bfcl_eval_400.parquet"
+  "bfcl_grpo_tpatch|bfcl|data/bfcl_train.parquet,data/bfcl_eval_400.parquet"
+  "bfcl_grpo_apatch|bfcl|data/bfcl_train.parquet,data/bfcl_eval_400.parquet"
 )
 
 SELECTED_EXPERIMENTS=()

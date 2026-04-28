@@ -1,40 +1,45 @@
-# Full TOCF: T-Patch + A-Patch + E-Patch + S-Patch.
+# Shared strict TAES ablation base for BFCL.
 #
-# T/A are environment-side adaptation:
-#   - T-Patch adapts task exposure from category + failure-tag capability state.
-#   - A-Patch adapts diagnostic feedback pressure via dynamic tag weights.
-# E/S are model-side adaptation:
-#   - E-Patch replays ranked self-evolved memories.
-#   - S-Patch explores prompt strategies with a persistent hierarchical bandit.
+# This is intentionally NOT the full TAES model. It keeps the actual reward
+# identical to sparse GRPO (1.0 on pass, 0.0 on fail) while using the BFCL
+# dense grader only to expose diagnostic failure tags in reward metadata.
+#
+# Use this as the control for strict module attribution:
+#   - bfcl_grpo.yaml: pure sparse GRPO, no TOCF plumbing.
+#   - bfcl_tocf_taes_base.yaml: sparse GRPO + diagnostic tags, all TAES off.
+#   - bfcl_grpo_tpatch.yaml: sparse GRPO + T-Patch only.
+#   - bfcl_grpo_apatch.yaml: sparse GRPO + A-Patch only.
+#
+# CoEvo and synthetic task generation are intentionally not part of this base.
 
 defaults:
   - bfcl_grpo_base
   - _self_
 
 trainer:
-  project_name: bfcl_tocf_taes
-  experiment_name: bfcl_taes_grpo_official_split
+  project_name: bfcl_grpo_module_ablation
+  experiment_name: bfcl_tocf_taes_base
 
 task_manager:
   grader:
+    # Diagnostic-only BFCL grader. With capped mode and partial_credit_cap=0.0,
+    # non-passing trajectories still receive reward 0.0, but failure tags are
+    # written to metadata for T/A/E/S modules.
     original_grader: bfcl-dense-env
 
 tocf:
   enable: true
-  persistence_dir: experiments/bfcl_tocf_taes/tocf_state
+  persistence_dir: experiments/bfcl_grpo_module_ablation/base/tocf_state
 
   state:
-    dir: experiments/bfcl_tocf_taes/tocf_state
+    dir: experiments/bfcl_grpo_module_ablation/base/tocf_state
 
   stats:
     enable: true
-    dump_dir: experiments/bfcl_tocf_taes/tocf_stats
-
-  coevo:
-    enable: false
+    dump_dir: experiments/bfcl_grpo_module_ablation/base/tocf_stats
 
   task_distribution:
-    enable: true
+    enable: false
     category_weights:
       multi_turn_base: 1.0
       multi_turn_miss_param: 1.0
@@ -65,13 +70,15 @@ tocf:
   feedback:
     dense_reward:
       enable: true
-      mode: t3rl
-      irrelevance_weight: 0.5
-      scorable_floor: false
+      mode: capped
+      partial_credit_cap: 0.0
+      partial_credit_weight: 1.0
+      cap_decay: false
+      min_cap: 0.0
 
   advantage:
     apatch:
-      enable: true
+      enable: false
       min_scale: 0.5
       max_scale: 2.0
       apply_to: all
@@ -92,17 +99,20 @@ tocf:
         pass: 1.0
 
   self_evolution:
-    enable: true
+    enable: false
     max_per_category: 5
     inject_prob: 0.5
     critique_prob: 0.5
     apply_to_validation: false
 
   strategy:
-    enable: true
+    enable: false
     inject_prob: 0.7
     apply_to_validation: false
     prior_alpha: 1.0
     prior_beta: 1.0
     hierarchical_prior_weight: 0.5
     template: "\n\n[Strategy] {text}\n"
+
+  coevo:
+    enable: false

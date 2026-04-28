@@ -19,13 +19,13 @@ data:
   # NOTE: do NOT use `data/bfcl_test_400.parquet` (deprecated train/test-mixed stub).
   train_files: data/bfcl_train.parquet
   val_files: data/bfcl_eval_400.parquet
-  train_batch_size: 16
+  train_batch_size: 32
   max_prompt_length: 8192
   max_response_length: 4096
   return_raw_chat: true
-  filter_overlong_prompts: true
+  filter_overlong_prompts: false
   truncation: "error"
-  val_batch_size: 256
+  val_batch_size: 400
   val_type: "val"
 
 # ── Algorithm: standard GRPO ──────────────────────────────────────────────────
@@ -55,7 +55,7 @@ actor_rollout_ref:
     prompt_length: ${data.max_prompt_length}
     response_length: ${data.max_response_length}
     max_model_len: 16384
-    gpu_memory_utilization: 0.6
+    gpu_memory_utilization: 0.3
     tensor_model_parallel_size: 1
     log_prob_micro_batch_size_per_gpu: 1
     log_prob_max_token_len_per_gpu: 16384
@@ -78,7 +78,7 @@ actor_rollout_ref:
     kl_loss_type: low_var_kl
     clip_ratio: 0.2
     clip_ratio_low: 0.2
-    clip_ratio_high: 0.28
+    clip_ratio_high: 0.2
     off_cliprange_high: 1.0
     clip_ratio_c: 10.0
     grad_clip: 1.0
@@ -133,7 +133,7 @@ trainer:
   keep_only_best_checkpoint: true
   save_limit: 0
   test_freq: 10
-  total_epochs: 8
+  total_epochs: 6
   val_before_train: true
   val_only: false
 
