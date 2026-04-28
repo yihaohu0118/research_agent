@@ -1,8 +1,0 @@
-hydra:
-  searchpath:
-    - file://external/config_fallback
-    - file://config
-
-defaults:
-  - bfcl_tocf_taes_base
-  - _self_

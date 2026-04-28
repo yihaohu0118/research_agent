@@ -7,7 +7,7 @@ hydra:
     - file://config
 
 defaults:
-  - bfcl_tocf_taes_base
+  - bfcl_tocf_taes_shared
   - _self_
 
 trainer:
