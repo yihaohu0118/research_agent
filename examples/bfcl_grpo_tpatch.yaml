@@ -1,6 +1,11 @@
 # Strict T-Patch ablation: GRPO + adaptive task exposure only.
 # Reward remains binary through bfcl_tocf_taes_base.
 
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
 defaults:
   - bfcl_tocf_taes_base
   - _self_
