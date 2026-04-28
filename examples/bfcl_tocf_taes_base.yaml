@@ -12,6 +12,11 @@
 #
 # CoEvo and synthetic task generation are intentionally not part of this base.
 
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
 defaults:
   - bfcl_grpo_base
   - _self_
