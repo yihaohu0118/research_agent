@@ -23,7 +23,7 @@ data:
   max_prompt_length: 8192
   max_response_length: 4096
   return_raw_chat: true
-  filter_overlong_prompts: false
+  filter_overlong_prompts: true
   truncation: "error"
   val_batch_size: 256
   val_type: "val"
