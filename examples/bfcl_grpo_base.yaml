@@ -2,7 +2,7 @@
 #
 # This is the control run for TOCF experiments:
 #   - same EnvTuning BFCL parquet files as TOCF
-#   - same 4-GPU / 10-epoch / rollout.n=8 budget
+#   - same 4-GPU / 8-epoch / rollout.n=8 budget
 #   - no task exploration, no experience injection, no ADCA
 #   - no TOCF adaptive sampling and no BFCL dense reward
 
@@ -133,7 +133,7 @@ trainer:
   keep_only_best_checkpoint: true
   save_limit: 0
   test_freq: 10
-  total_epochs: 5
+  total_epochs: 8
   val_before_train: true
   val_only: false
 
