@@ -1,6 +1,11 @@
 # Strict A-Patch ablation: GRPO + tag-aware advantage scaling only.
 # The BFCL dense grader is diagnostic-only; reward remains binary.
 
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
 defaults:
   - bfcl_tocf_taes_base
   - _self_
