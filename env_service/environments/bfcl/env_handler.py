@@ -532,24 +532,13 @@ class EnvHandler:
                     handler, model_result_data, prompt_data, model_name, category
                 )
             else:
-                synthetic_possible_answer = (
-                    (original_test_entry.get("metadata") or {}).get(
-                        "synthetic_possible_answer"
-                    )
-                    if isinstance(original_test_entry.get("metadata"), dict)
-                    else None
+                possible_answer_file = find_file_by_category(
+                    category, self._answer_path
                 )
-                if isinstance(synthetic_possible_answer, dict):
-                    possible_answer = [synthetic_possible_answer]
-                else:
-                    # Find the corresponding possible answer file
-                    possible_answer_file = find_file_by_category(
-                        category, self._answer_path
-                    )
-                    possible_answer = load_file(possible_answer_file, sort_by_id=True)
-                    possible_answer = [
-                        item for item in possible_answer if item["id"] == test_id
-                    ]
+                possible_answer = load_file(possible_answer_file, sort_by_id=True)
+                possible_answer = [
+                    item for item in possible_answer if item["id"] == test_id
+                ]
                 if is_multi_turn(category):
                     accuracy, total_count = self._eval_multi_turn_test(
                         handler,
@@ -635,6 +624,12 @@ class EnvHandler:
                             "passed_irrelevance_turns"
                         ),
                         "irrelevance_turns": _progress_info.get("irrelevance_turns"),
+                        "mfpatch_spurious_turns": model_result_data.get(
+                            "mfpatch_spurious_turns", []
+                        ),
+                        "mfpatch_abstention_turns": model_result_data.get(
+                            "mfpatch_abstention_turns", []
+                        ),
                         "terminated_early": _progress_info.get("terminated_early"),
                         "error": _progress_info.get("error"),
                     }
@@ -761,11 +756,19 @@ class EnvHandler:
                 attempted_count = len(rejected) if isinstance(rejected, list) else 1
                 num_tool_calls_attempted += max(1, int(attempted_count))
                 turn_had_call = True
+            elif message.get("_bfcl_mfpatch_spurious_tool_calls"):
+                has_invalid_tool_call = True
+                error_count += 1
+                rejected = message.get("_bfcl_mfpatch_spurious_tool_calls", []) or []
+                attempted_count = len(rejected) if isinstance(rejected, list) else 1
+                num_tool_calls_attempted += max(1, int(attempted_count))
+                turn_had_call = True
 
             if role == "assistant":
                 accepted_calls = (
                     message.get("tool_calls") or []
                     if not message.get("_bfcl_rejected_tool_calls")
+                    and not message.get("_bfcl_mfpatch_spurious_tool_calls")
                     else []
                 )
                 if accepted_calls:
@@ -1053,15 +1056,41 @@ class EnvHandler:
         else:
             turns_data = self._extract_single_turn_response(messages)
 
+        mfpatch_turns = self._extract_mfpatch_turns(messages)
         model_result_data = {
             "id": test_id,
             "result": turns_data,
             "latency": conversation_result.get("total_latency", 0),
             "input_token_count": conversation_result.get("total_input_tokens", 0),
             "output_token_count": conversation_result.get("total_output_tokens", 0),
+            "mfpatch_spurious_turns": mfpatch_turns["spurious"],
+            "mfpatch_abstention_turns": mfpatch_turns["abstention"],
         }
 
         return model_result_data
+
+    def _extract_mfpatch_turns(
+        self,
+        messages: List[Dict[str, Any]],
+    ) -> Dict[str, List[int]]:
+        spurious: List[int] = []
+        abstention: List[int] = []
+        for message in messages:
+            if message.get("role") != "assistant":
+                continue
+            metadata = message.get("_bfcl_mfpatch")
+            if not isinstance(metadata, dict):
+                continue
+            try:
+                turn = int(metadata.get("turn"))
+            except Exception:
+                continue
+            outcome = str(metadata.get("outcome") or "")
+            if outcome == "spurious_tool_call":
+                spurious.append(turn)
+            elif outcome == "correct_abstention":
+                abstention.append(turn)
+        return {"spurious": spurious, "abstention": abstention}
 
     def _extract_multi_turn_responses(
         self, messages: List[Dict[str, Any]]

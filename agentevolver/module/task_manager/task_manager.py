@@ -223,8 +223,6 @@ class TaskManager(object):
             show_progress (bool): Whether to show a progress bar.
             resume_file (Optional[str]): The path to the resume file. If not provided, a default file is used.
             n_rollouts (Optional[int]): Override how many exploration rollouts to run per seed task.
-                This lets co-evolution generate candidates even when normal synthetic task generation
-                is disabled with task_manager.n = 0.
 
         Returns:
             list[TaskObjective]: A list of generated TaskObjective objects.
@@ -389,8 +387,6 @@ class FullDataset(Dataset):
                  reward_config:RewardProps,
                  cache_path: Optional[str] = None,
                  *,
-                 initial_evolved_objectives: Optional[Sequence[TaskObjective]] = None,
-                 evolved_mix_ratio: float = 0.0,
                  tokenizer,
                  config,
                  processor):
@@ -408,14 +404,6 @@ class FullDataset(Dataset):
         self._objectives = []
         self._dataset = None
         self._synthetic_objectives = []
-        self._evolved_objectives = [
-            copy.deepcopy(item) for item in (initial_evolved_objectives or [])
-        ]
-        self._evolved_mix_ratio = max(0.0, float(evolved_mix_ratio))
-        self._evolved_rebuild_count = 0
-        for item in self._evolved_objectives:
-            item.task.evaluator = self._reward_config["synthetic_grader"]
-            item.task.open_query = True
 
         # tag, used to mark whether the dataset needs to be refreshed
         self._refresh_after_epoch = False
@@ -451,28 +439,6 @@ class FullDataset(Dataset):
             None
         """
         self._objectives = self._mixture_strategy.mix_data(self._synthetic_objectives, self._tasks)  # ⭐ Mixes synthetic objectives with current tasks
-        if self._evolved_objectives and self._evolved_mix_ratio > 0.0:
-            target_count = int(len(self._tasks) * self._evolved_mix_ratio)
-            if target_count <= 0:
-                target_count = min(len(self._evolved_objectives), 1)
-            rng = random.Random(self._evolved_rebuild_count)
-            if target_count >= len(self._evolved_objectives):
-                selected = [copy.deepcopy(item) for item in self._evolved_objectives]
-            else:
-                remaining = list(self._evolved_objectives)
-                selected = []
-                for _ in range(min(target_count, len(remaining))):
-                    weights = []
-                    for item in remaining:
-                        coevo = ((item.task.metadata or {}).get("tocf") or {}).get("coevo", {}) or {}
-                        pressure = float(coevo.get("pressure", 0.0) or 0.0)
-                        confidence = float(item.confidence or 0.0)
-                        weights.append(max(0.1, 1.0 + pressure + 0.25 * confidence))
-                    picked = rng.choices(range(len(remaining)), weights=weights, k=1)[0]
-                    selected.append(copy.deepcopy(remaining.pop(picked)))
-            self._objectives.extend(selected)
-            self._evolved_rebuild_count += 1
-            logger.info(f"added {len(selected)} evolved tasks (ratio={self._evolved_mix_ratio})")
         self._dataset = to_rl_dataset(self._objectives, self._tokenizer, self._config, self._processor)  # ⭐ Converts the mixed data into an RL dataset
         logger.info(f"Auto-refreshed dataset: #objectives={len(self._objectives)}, #rlhf={len(self._dataset)}")  # ⭐ Logs the number of objectives and RLHF items
 
@@ -487,8 +453,8 @@ class FullDataset(Dataset):
         Returns:
             None
         """
-        if not self._synthetic_objectives and not self._evolved_objectives:
-            logger.warning("No synthetic/evolved objectives available, did you call load_from_file() or reload() first?")
+        if not self._synthetic_objectives:
+            logger.warning("No synthetic objectives available, did you call load_from_file() or reload() first?")
         self._rebuild_dataset()  # ⭐ Rebuilds the dataset
         logger.info("Dataset updated manually via update().")
 
@@ -532,20 +498,6 @@ class FullDataset(Dataset):
         task_weights = getattr(patches, "task_weights", None)
         if task_weights is not None:
             self.set_tocf_task_weights(task_weights)
-
-    def set_evolved_objectives(self, objectives: Sequence[TaskObjective]):
-        self._evolved_objectives = [copy.deepcopy(item) for item in objectives]
-        logger.info(f"updated evolved task pool: #objectives={len(self._evolved_objectives)}")
-        for item in self._evolved_objectives:
-            item.task.evaluator = self._reward_config["synthetic_grader"]
-            item.task.open_query = True
-
-    def existing_objective_queries(self) -> set[str]:
-        queries: set[str] = set()
-        for objective in list(self._synthetic_objectives) + list(self._evolved_objectives):
-            if objective.task.query:
-                queries.add(str(objective.task.query))
-        return queries
 
     def save_to_file(self):
         """
@@ -627,30 +579,23 @@ class FullDataset(Dataset):
             return {
                 "total": 0,
                 "synthetic": 0,
-                "evolved": 0,
                 "original": 0,
                 "synthetic_ratio": 0.0,
                 "strategy_info": str(self._mixture_strategy)
             }
 
         synthetic_count = 0
-        evolved_count = 0
         for obj in self._objectives:
             if not obj.task.open_query:
                 continue
-            coevo_meta = ((obj.task.metadata or {}).get("tocf") or {}).get("coevo", {}) or {}
-            if coevo_meta.get("source") == "coevo":
-                evolved_count += 1
-            else:
-                synthetic_count += 1
-        original_count = len(self._objectives) - synthetic_count - evolved_count  # ⭐ Calculate the number of original tasks
+            synthetic_count += 1
+        original_count = len(self._objectives) - synthetic_count  # ⭐ Calculate the number of original tasks
 
         return {
             "total": len(self._objectives),
             "synthetic": synthetic_count,
-            "evolved": evolved_count,
             "original": original_count,
-            "synthetic_ratio": (synthetic_count + evolved_count) / len(self._objectives) if len(self._objectives) > 0 else 0,
+            "synthetic_ratio": synthetic_count / len(self._objectives) if len(self._objectives) > 0 else 0,
             "strategy_info": str(self._mixture_strategy)
         }
 

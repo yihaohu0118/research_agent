@@ -478,21 +478,6 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
         else:
             self.strategy_bandit = None
 
-        from agentevolver.module.tocf.coevo import coevo_enabled
-        from agentevolver.module.tocf.task_bank import EvolvedTaskBank
-        if coevo_enabled(config):
-            coevo_cfg = (tocf_cfg.get("coevo", {}) or {}) if tocf_cfg else {}
-            bank_path = coevo_cfg.get("path", None)
-            if not bank_path and persistence_dir:
-                bank_path = os.path.join(str(persistence_dir), "evolved_task_bank.json")
-            self.evolved_task_bank = EvolvedTaskBank(
-                path=bank_path,
-                max_total=int(coevo_cfg.get("max_total_tasks", 256) or 256),
-                max_per_parent=int(coevo_cfg.get("max_per_parent", 16) or 16),
-            )
-        else:
-            self.evolved_task_bank = None
-
         self._create_dataloader_from_manager(collate_fn, shuffle_trainset)  # ⭐ Create dataloader from the provided manager
 
 
@@ -648,18 +633,11 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
             
             assert num_loaded_val_tasks > 0, "failed to load val/dev dataset from environment"
         
-        coevo_mix_ratio = float(OmegaConf.select(self.config, "tocf.coevo.mix_ratio", default=0.0) or 0.0)
-        initial_evolved_objectives = (
-            self.evolved_task_bank.objectives() if self.evolved_task_bank is not None else None
-        )
-
         self.train_dataset = FullDataset(
             self.train_task_manager,
             self.train_task_manager._mixture_strategy,
             self.train_task_manager._reward_config,
             self.config.task_manager.train_data_path,
-            initial_evolved_objectives=initial_evolved_objectives,
-            evolved_mix_ratio=coevo_mix_ratio,
             tokenizer=self.tokenizer,
             config=self.config.data,
             processor=self.processor,
@@ -727,173 +705,6 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
             print(f"Warning: Could not set total_training_steps in config. Structure missing? Error: {e}")
 
 
-    def _run_coevo_epoch(self, epoch: int | str) -> dict[str, float]:
-        if self.evolved_task_bank is None or self.tocf_state is None:
-            return {}
-
-        from agentevolver.module.tocf.coevo import (
-            coevo_enabled,
-            finalize_coevo_objectives,
-            select_coevo_seed_tasks,
-        )
-
-        if not coevo_enabled(self.config):
-            return {}
-
-        coevo_cfg = OmegaConf.select(self.config, "tocf.coevo", default={}) or {}
-        every_n_epochs = max(1, int(_cfg_lookup(coevo_cfg, "generate_every_n_epochs", 1) or 1))
-        if isinstance(epoch, int) and epoch % every_n_epochs != 0:
-            return {"tocf/coevo/skipped_epoch": 1.0}
-
-        checkpoint_dir = OmegaConf.select(self.config, "tocf.persistence_dir", default=None) or "."
-        checkpoint_path = os.path.join(str(checkpoint_dir), f"coevo_generate_epoch_{epoch}.checkpoint.json")
-
-        parent_tasks = select_coevo_seed_tasks(
-            self.train_task_manager.seed_tasks,
-            self.tocf_state,
-            self.config,
-            epoch=epoch,
-        )
-        metrics: dict[str, float] = {
-            "tocf/coevo/selected_parents": float(len(parent_tasks)),
-        }
-        if not parent_tasks:
-            metrics.update(self.evolved_task_bank.metrics())
-            return metrics
-
-        rollouts_per_parent = max(
-            1,
-            int(
-                _cfg_lookup(
-                    coevo_cfg,
-                    "rollouts_per_parent",
-                    getattr(self.train_task_manager, "_n", 0) or 1,
-                )
-                or 1
-            ),
-        )
-        metrics["tocf/coevo/rollouts_per_parent"] = float(rollouts_per_parent)
-
-        generated = self.train_task_manager.generate_task(
-            parent_tasks,
-            show_progress=False,
-            resume_file=checkpoint_path,
-            n_rollouts=rollouts_per_parent,
-        )
-        metrics["tocf/coevo/generated_candidates"] = float(len(generated))
-        bfcl_synthetic_grader = _cfg_lookup(
-            coevo_cfg,
-            "bfcl_synthetic_grader",
-            "bfcl-synthetic-env" if self.config.env_service.env_type == "bfcl" else None,
-        )
-        finalized = finalize_coevo_objectives(
-            generated,
-            synthetic_grader=self.train_task_manager._reward_config["synthetic_grader"],
-            bfcl_synthetic_grader=bfcl_synthetic_grader,
-            require_executable_gt=bool(
-                _cfg_lookup(coevo_cfg, "require_executable_gt", True)
-            ),
-            require_semantic_alignment=bool(
-                _cfg_lookup(coevo_cfg, "require_semantic_alignment", True)
-            ),
-            min_semantic_score=float(
-                _cfg_lookup(coevo_cfg, "min_semantic_score", 0.34) or 0.34
-            ),
-            epoch=epoch,
-        )
-        metrics["tocf/coevo/finalized_candidates"] = float(len(finalized))
-        validate_bfcl_gt = bool(
-            _cfg_lookup(
-                coevo_cfg,
-                "validate_bfcl_gt_before_accept",
-                _cfg_lookup(coevo_cfg, "require_executable_gt", True),
-            )
-        )
-        if validate_bfcl_gt and bfcl_synthetic_grader and finalized:
-            from agentevolver.module.tocf.bfcl_synthetic import (
-                bfcl_synthetic_env_params,
-                normalize_tool_turns,
-                replay_tool_turns_in_bfcl_env,
-            )
-
-            env_params = {"is_open_query": True}
-            bfcl_params = OmegaConf.select(self.config, "env_service.bfcl", default=None)
-            if bfcl_params is not None:
-                bfcl_params = OmegaConf.to_container(bfcl_params, resolve=True)
-                if isinstance(bfcl_params, dict):
-                    env_params.update(bfcl_params)
-            env_params.setdefault("strict_tool_parser", True)
-
-            verifier_env = EnvClient(base_url=self.config.env_service.env_url)
-            checked = 0
-            rejected = 0
-            executable_finalized = []
-            for objective in finalized:
-                if (
-                    objective.task.env_type != "bfcl"
-                    or objective.task.evaluator != bfcl_synthetic_grader
-                ):
-                    executable_finalized.append(objective)
-                    continue
-
-                checked += 1
-                normalized_gt = normalize_tool_turns(objective.ground_truth)
-                replay_params, overlay_reason = bfcl_synthetic_env_params(
-                    objective.task,
-                    env_params,
-                    turns=normalized_gt,
-                )
-                if "synthetic_case_overlay" not in replay_params:
-                    ok, reason = False, overlay_reason
-                else:
-                    ok, reason = replay_tool_turns_in_bfcl_env(
-                        verifier_env,
-                        str(objective.task.task_id),
-                        normalized_gt,
-                        params=replay_params,
-                        instance_prefix="bfcl_coevo_gt",
-                    )
-                metadata = dict(objective.task.metadata or {})
-                tocf_meta = dict(metadata.get("tocf") or {})
-                coevo_meta = dict(tocf_meta.get("coevo") or {})
-                coevo_meta["gt_executable"] = bool(ok)
-                coevo_meta["gt_execution_check"] = "coevo_accept_env_replay"
-                coevo_meta["gt_execution_reason"] = reason
-                tocf_meta["coevo"] = coevo_meta
-                metadata["tocf"] = tocf_meta
-                objective.task.metadata = metadata
-                if ok:
-                    executable_finalized.append(objective)
-                else:
-                    rejected += 1
-
-            finalized = executable_finalized
-            metrics["tocf/coevo/gt_replay_checked"] = float(checked)
-            metrics["tocf/coevo/gt_replay_rejected"] = float(rejected)
-        metrics["tocf/coevo/executable_candidates"] = float(len(finalized))
-
-        accepted = self.evolved_task_bank.add_candidates(
-            finalized,
-            min_confidence=float(_cfg_lookup(coevo_cfg, "min_confidence", 0.4) or 0.4),
-            max_new=int(_cfg_lookup(coevo_cfg, "max_new_tasks_per_epoch", 32) or 32),
-            existing_queries=self.train_dataset.existing_objective_queries(),
-            min_query_chars=int(_cfg_lookup(coevo_cfg, "min_query_chars", 24) or 24),
-            min_query_tokens=int(_cfg_lookup(coevo_cfg, "min_query_tokens", 5) or 5),
-            max_query_similarity=float(_cfg_lookup(coevo_cfg, "max_query_similarity", 0.9) or 0.9),
-            max_jaccard_similarity=float(_cfg_lookup(coevo_cfg, "max_jaccard_similarity", 0.8) or 0.8),
-        )
-        metrics["tocf/coevo/accepted_candidates"] = float(len(accepted))
-        retired = self.evolved_task_bank.retire_stale(
-            current_epoch=epoch,
-            max_staleness=_cfg_lookup(coevo_cfg, "retire_after_epochs", None),
-        )
-        metrics["tocf/coevo/retired_candidates"] = float(retired)
-        if accepted or retired:
-            self.train_dataset.set_evolved_objectives(self.evolved_task_bank.objectives())
-        self.evolved_task_bank.save()
-        metrics.update(self.evolved_task_bank.metrics())
-        return metrics
-
     def _finalize_tocf_epoch(self, epoch: int | str, tracking_logger=None) -> None:
         if self.tocf_stats is not None:
             if self.tocf_stats_metrics_enabled:
@@ -908,11 +719,6 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                 metrics = self.tocf_controller.metrics()
                 if tracking_logger is not None and metrics:
                     tracking_logger.log(data=metrics, step=self.global_steps)
-
-        if self.evolved_task_bank is not None:
-            metrics = self._run_coevo_epoch(epoch)
-            if tracking_logger is not None and metrics:
-                tracking_logger.log(data=metrics, step=self.global_steps)
 
         if self.tocf_stats is not None:
             self.tocf_stats.reset_window()

@@ -1,0 +1,26 @@
+# Strict T+A ablation: GRPO + adaptive task exposure + tag-aware advantage scaling.
+# Reward remains binary through bfcl_tocf_taes_shared.
+
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
+defaults:
+  - bfcl_tocf_taes_shared
+  - _self_
+
+trainer:
+  experiment_name: bfcl_grpo_ta
+
+tocf:
+  persistence_dir: experiments/bfcl_grpo_module_ablation/ta/tocf_state
+  state:
+    dir: experiments/bfcl_grpo_module_ablation/ta/tocf_state
+  stats:
+    dump_dir: experiments/bfcl_grpo_module_ablation/ta/tocf_stats
+  task_distribution:
+    enable: true
+  advantage:
+    apatch:
+      enable: true

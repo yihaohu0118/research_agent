@@ -12,7 +12,7 @@
 #   - bfcl_grpo_tpatch.yaml: sparse GRPO + T-Patch only.
 #   - bfcl_grpo_apatch.yaml: sparse GRPO + A-Patch only.
 #
-# CoEvo and synthetic task generation are intentionally not part of this base.
+# Task generation is intentionally not part of this base.
 
 defaults:
   - bfcl_grpo_base
@@ -115,6 +115,3 @@ tocf:
     prior_beta: 1.0
     hierarchical_prior_weight: 0.5
     template: "\n\n[Strategy] {text}\n"
-
-  coevo:
-    enable: false

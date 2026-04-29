@@ -25,9 +25,9 @@ import uuid
 from env_service.base import BaseEnv
 from env_service.registry import Registry
 from env_service.trajectory import StateMessage, ActionMessage, ToolCall
-from agentevolver.module.tocf.bfcl_synthetic import (
-    materialize_bfcl_synthetic_case,
-    write_materialized_bfcl_synthetic_case,
+from bfcl_eval.utils import (
+    find_file_by_category,
+    load_file,
 )
 
 
@@ -310,7 +310,7 @@ class BfclEnv(BaseEnv):
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.tools_info = ""
-        self.synthetic_case_overlay: Dict[str, Any] | None = None
+        self._mfpatch_ground_truth: list[Any] = []
 
     # ------------------------------------------------------------------ #
     # 生命周期
@@ -320,8 +320,10 @@ class BfclEnv(BaseEnv):
         if params:
             self.params.update(params)
         self.test_entry = self._load_test_case(self.data_path, self.task_id)
-        self.test_entry = self._apply_synthetic_case_overlay(self.test_entry)
         self.original_test_entry = self.test_entry
+        self._mfpatch_ground_truth = self._load_possible_answer_ground_truth(
+            self.test_entry
+        )
 
         # 必须成功实例化真实 EnvHandler
         from env_service.environments.bfcl.env_handler import EnvHandler
@@ -357,6 +359,8 @@ class BfclEnv(BaseEnv):
             tools,
             prompt_mode=self.params.get("tool_prompt_mode", "bfcl_qwen_fc"),
         )
+        if self._mfpatch_enabled():
+            tool_prompt = f"{tool_prompt}\n\n{self._mfpatch_instruction()}"
         return {
             # system_prompt + "\n\n" + first_query
             "state": [
@@ -369,10 +373,7 @@ class BfclEnv(BaseEnv):
                 "test_id": self.test_entry.get("id", "unknown"),
                 "tools_count": len(tools),
                 "questions_count": len(self.original_test_entry.get("question", [])),
-                "synthetic_case_overlay": bool(self.synthetic_case_overlay),
-                "synthetic_objective_hash": (
-                    self.synthetic_case_overlay or {}
-                ).get("objective_hash"),
+                "mf_patch": bool(self._mfpatch_enabled()),
             },
         }
 
@@ -429,6 +430,9 @@ class BfclEnv(BaseEnv):
         parse_error = assistant_entry.pop("_bfcl_parse_error", None)
 
         self.conversation_history.append(assistant_entry) ### change by czy0712
+        if self._mfpatch_should_intercept_empty_gt_turn(parse_error, assistant_entry):
+            return self._handle_mfpatch_empty_gt_turn(assistant_entry, parse_error)
+
         if parse_error:
             assistant_entry["_bfcl_rejected_tool_calls"] = assistant_entry.get(
                 "tool_calls", []
@@ -462,13 +466,16 @@ class BfclEnv(BaseEnv):
             )
             assistant_entry["tool_calls"] = []
 
-        # 把环境消息写回历史并构建新 StateMessage
-        # 共有部分: role=<Role.USER: 'user'> timestamp='2025-xxx' metadata={} tool_call_id=''
-        # 1. query回合时, 封装核心是 content="What's xxx?" reasoning_content='' tool_calls=[] 
-        # 2. 工具调用回合时，封装核心是 content='' reasoning_content='' tool_calls=[ToolCall(index=0, id='chatcmpl-tool-xxx', name='bfcl_tool', arguments='{}', type='tool', result='<execution_results>')]
+        return self._append_env_response(env_resp)
+
+    def _append_env_response(
+        self,
+        env_resp: Dict[str, Any],
+    ) -> StateMessage:
+        """Append EnvHandler response to history and build the next state."""
         new_tool_calls: list[ToolCall] = []
         next_msg_content = ""
-        
+
         # FIXME: yunpeng - messages 可能是多个吗
         for idx, msg in enumerate(env_resp.get("messages", [])):
             self.conversation_history.append(msg)
@@ -487,11 +494,161 @@ class BfclEnv(BaseEnv):
                 # 1. [{"role": "env", "content": "[CONVERSATION_COMPLETED]"}]
                 # 2. [{"role": "env", "content": f"[ERROR] {error_message}"}]
                 next_msg_content = msg.get("content", "")
-        
+
         return (
             StateMessage(role="user",content=next_msg_content)
              ###### changed by czy0718, without tool_role, trajectory.steps cannot be converted by tool_execution_results
         )
+
+    def _mfpatch_config(self) -> Dict[str, Any]:
+        cfg = self.params.get("mf_patch")
+        if cfg is None:
+            cfg = self.params.get("miss_func_patch")
+        return cfg if isinstance(cfg, dict) else {}
+
+    def _mfpatch_enabled(self) -> bool:
+        cfg = self._mfpatch_config()
+        if not bool(cfg.get("enable", False)):
+            return False
+
+        mode = str(self.params.get("rollout_mode", "") or "").lower()
+        if mode in {"validate", "validation", "val", "test"} and not bool(
+            cfg.get("apply_to_validation", False)
+        ):
+            return False
+
+        category = self._test_category()
+        categories = cfg.get("categories", ["multi_turn_miss_func"])
+        if isinstance(categories, str):
+            categories = [categories]
+        if categories and category not in set(str(item) for item in categories):
+            return False
+        return True
+
+    def _test_category(self) -> str:
+        entry = self.test_entry or self.original_test_entry or {}
+        test_id = str(entry.get("id") or self.task_id or "")
+        return test_id.rsplit("_", 1)[0] if "_" in test_id else test_id
+
+    def _mfpatch_instruction(self) -> str:
+        cfg = self._mfpatch_config()
+        return str(
+            cfg.get(
+                "instruction",
+                "Missing-function rule: if the current user request cannot be "
+                "satisfied by any currently available function, do not call a "
+                "similar or unavailable tool. Respond briefly in plain text, "
+                "then wait for the next user instruction or newly provided tool "
+                "schema.",
+            )
+        ).strip()
+
+    def _mfpatch_current_turn_empty_gt(self) -> bool:
+        if self.current_turn < 0 or self.current_turn >= len(self._mfpatch_ground_truth):
+            return False
+        turn_gt = self._mfpatch_ground_truth[self.current_turn]
+        if turn_gt is None:
+            return True
+        if isinstance(turn_gt, (list, tuple, set, dict)):
+            return len(turn_gt) == 0
+        return False
+
+    def _mfpatch_should_intercept_empty_gt_turn(
+        self, parse_error: str | None, assistant_entry: Dict[str, Any]
+    ) -> bool:
+        if self.env_handler is None or self.original_test_entry is None:
+            return False
+        if not self._mfpatch_enabled():
+            return False
+        if not self._mfpatch_current_turn_empty_gt():
+            return False
+        if bool(self._mfpatch_config().get("intercept_parse_error", True)):
+            return True
+        return parse_error is None
+
+    def _handle_mfpatch_empty_gt_turn(
+        self,
+        assistant_entry: Dict[str, Any],
+        parse_error: str | None,
+    ) -> StateMessage:
+        """EnvTuning-style no-GT turn transition for BFCL miss_func.
+
+        Empty-GT turns are not tool-execution opportunities. A plain answer is
+        a correct abstention and moves to the next turn. Any tool attempt is
+        recorded as spurious, not executed, and also moves to the next turn.
+        """
+        tool_calls = assistant_entry.get("tool_calls", []) or []
+        attempted_tool = bool(parse_error) or bool(tool_calls)
+        outcome = "spurious_tool_call" if attempted_tool else "correct_abstention"
+        assistant_entry["_bfcl_mfpatch"] = {
+            "turn": int(self.current_turn),
+            "outcome": outcome,
+        }
+
+        if attempted_tool:
+            rejected = tool_calls if tool_calls else [{"error": parse_error or outcome}]
+            assistant_entry["_bfcl_mfpatch_spurious_tool_calls"] = rejected
+            assistant_entry["_bfcl_rejected_tool_calls"] = rejected
+            assistant_entry["tool_calls"] = []
+        else:
+            assistant_entry["_bfcl_mfpatch_correct_abstention"] = True
+
+        env_resp = self.env_handler.interact(
+            self.conversation_history,
+            self.original_test_entry,
+            enforce_available_tools=bool(
+                self.params.get("enforce_available_tools", True)
+            ),
+        )
+        if attempted_tool and bool(
+            self._mfpatch_config().get("force_advance_on_spurious_tool", True)
+        ):
+            env_resp = self._mfpatch_add_warning(env_resp)
+        return self._append_env_response(env_resp)
+
+    def _mfpatch_add_warning(self, env_resp: Dict[str, Any]) -> Dict[str, Any]:
+        messages = []
+        template = str(
+            self._mfpatch_config().get(
+                "warning_template",
+                "(SYSTEM WARNING: You should not call any function in this "
+                "turn because the required function description is missing in "
+                "the current tool list. Previous turn is forced quit. Current "
+                "function(s) will not be executed.) Next turn question:\n"
+                "{next_question}",
+            )
+        )
+        for msg in env_resp.get("messages", []):
+            msg = dict(msg)
+            if msg.get("role") == "user":
+                next_question = str(msg.get("content", "") or "")
+                try:
+                    msg["content"] = template.format(next_question=next_question)
+                except Exception:
+                    msg["content"] = f"{template}\n{next_question}"
+            messages.append(msg)
+        updated = dict(env_resp)
+        updated["messages"] = messages
+        return updated
+
+    def _load_possible_answer_ground_truth(
+        self, test_entry: Dict[str, Any]
+    ) -> list[Any]:
+        test_id = str(test_entry.get("id") or "")
+        category = test_id.rsplit("_", 1)[0] if "_" in test_id else test_id
+        try:
+            possible_answer_file = find_file_by_category(
+                category,
+                Path(self.answer_path),
+            )
+            possible_answer = load_file(possible_answer_file, sort_by_id=True)
+            for item in possible_answer:
+                if item.get("id") == test_id:
+                    gt = item.get("ground_truth", [])
+                    return gt if isinstance(gt, list) else []
+        except Exception:
+            return []
+        return []
 
     def evaluate(
         self,
@@ -557,49 +714,6 @@ class BfclEnv(BaseEnv):
                     if data.get("id") == test_id:
                         return data
                 raise ValueError(f"Test case id '{test_id}' not found in {data_path}")
-
-    def _apply_synthetic_case_overlay(self, test_entry: Dict[str, Any]) -> Dict[str, Any]:
-        overlay = self.params.get("synthetic_case_overlay")
-        if not isinstance(overlay, dict):
-            self.synthetic_case_overlay = None
-            return test_entry
-
-        question = overlay.get("question")
-        if not isinstance(question, list) or not question:
-            raise ValueError("synthetic_case_overlay.question must be a non-empty list")
-
-        normalized_question: list[list[Dict[str, Any]]] = []
-        for turn in question:
-            if not isinstance(turn, list) or not turn:
-                raise ValueError("synthetic_case_overlay.question turns must be non-empty lists")
-            normalized_turn: list[Dict[str, Any]] = []
-            for message in turn:
-                if not isinstance(message, dict):
-                    raise ValueError("synthetic_case_overlay.question messages must be objects")
-                role = message.get("role")
-                content = message.get("content")
-                if role != "user" or not isinstance(content, str) or not content.strip():
-                    raise ValueError(
-                        "synthetic_case_overlay.question currently supports user messages only"
-                    )
-                normalized_turn.append({"role": "user", "content": content})
-            normalized_question.append(normalized_turn)
-
-        overlay = dict(overlay)
-        overlay["question"] = normalized_question
-        overlaid, possible_answer = materialize_bfcl_synthetic_case(test_entry, overlay)
-        if isinstance(overlaid.get("metadata"), dict):
-            overlaid["metadata"]["synthetic_possible_answer"] = possible_answer
-            materialize_dir = self.params.get("synthetic_materialize_dir")
-            if materialize_dir:
-                files = write_materialized_bfcl_synthetic_case(
-                    overlaid,
-                    possible_answer,
-                    materialize_dir,
-                )
-                overlaid["metadata"]["synthetic_case_overlay"]["materialized_files"] = files
-        self.synthetic_case_overlay = overlay
-        return overlaid
 
     # 静态接口给 env_service 用
     @staticmethod

@@ -13,7 +13,6 @@ from agentevolver.module.context_manager.cmt_context_clip import SelfContextClip
 from agentevolver.module.exp_manager.exp_manager import TrajExpConfig
 from typing import List, Dict, Any, Optional
 from agentevolver.module.tocf.category import infer_task_category
-from agentevolver.module.tocf.bfcl_synthetic import bfcl_synthetic_env_params
 from agentevolver.module.tocf.patch import apply_query_suffix
 
 
@@ -60,21 +59,13 @@ class EnvWorker(object):
         """
 
         try:
-            env_params = {"is_open_query": self.is_open_query}
+            env_params = {
+                "is_open_query": self.is_open_query,
+                "rollout_mode": traj_exp_config.mode,
+            }
             bfcl_params = self.config.env_service.get("bfcl", None)
             if self.env_type == "bfcl" and bfcl_params is not None:
                 env_params.update(OmegaConf.to_container(bfcl_params, resolve=True))
-            synthetic_overlay_reason = "not_bfcl"
-            if self.env_type == "bfcl" and self.task.query is not None and self.task.ground_truth is not None:
-                env_params, synthetic_overlay_reason = bfcl_synthetic_env_params(self.task, env_params)
-                if (
-                    self.task.evaluator == "bfcl-synthetic-env"
-                    and "synthetic_case_overlay" not in env_params
-                ):
-                    raise RuntimeError(
-                        "BFCL synthetic task has no valid synthetic_case_overlay: "
-                        f"{synthetic_overlay_reason}"
-                    )
 
             init_response = self.env.create_instance(env_type=self.env_type,
                                                     task_id=self.task_id,
@@ -86,8 +77,7 @@ class EnvWorker(object):
             # replace query if new query is in task
             if self.task.query is not None:
                 assert init_messages[-1]["role"] == "user", "the latest message from environment must be user query"
-                if "synthetic_case_overlay" not in env_params:
-                    init_messages[-1]["content"] = self.task.query
+                init_messages[-1]["content"] = self.task.query
             else:
                 self.task.query = init_messages[-1]["content"]
 

@@ -2,7 +2,6 @@ import json
 from typing import Optional, Sequence, Tuple
 
 from agentevolver.module.task_manager.env_profiles import EnvProfile
-from agentevolver.module.tocf.coevo import coevo_guidance_for_task
 from agentevolver.schema.task import Task, TaskObjective
 from agentevolver.schema.trajectory import Trajectory
 
@@ -144,8 +143,6 @@ def get_task_summarize_prompt(
         idx += 1
 
     objectives: list[str] = [x.objective for x in old_objectives if x.objective is not None]
-    targeted_guidance = coevo_guidance_for_task(seed_task)
-
     user_prompt = f"""Please analyze the following agent interaction sequence and abstract specific tasks from it:
 
 {x}
@@ -160,8 +157,6 @@ Please avoid repeating these objectives.
 # Task Requirements
 
 {profile.get_task_preference_instruction() if profile is not None else "Please follow the instructions to generate tasks."}
-
-{targeted_guidance}
 
 # Now Start
 
@@ -190,19 +185,6 @@ def parse_tasks_from_response(task: Task, response: str) -> list[TaskObjective]:
             current_task = task.copy(deep=True)
             current_task.query = t["query"]
             current_task.open_query = True
-            metadata = dict(current_task.metadata or {})
-            bfcl_meta = dict((metadata.get("tocf") or {}).get("bfcl_synthetic") or {})
-            if "question_schedule" in t:
-                metadata["bfcl_synthetic_question_schedule"] = t["question_schedule"]
-                bfcl_meta["question_schedule"] = t["question_schedule"]
-            for key in ("semantic_rationale", "environment_constraints", "expected_final_response"):
-                if key in t:
-                    bfcl_meta[key] = t[key]
-            if bfcl_meta:
-                tocf_meta = dict(metadata.get("tocf") or {})
-                tocf_meta["bfcl_synthetic"] = bfcl_meta
-                metadata["tocf"] = tocf_meta
-                current_task.metadata = metadata
             x=TaskObjective(
                 task=current_task,
                 confidence=t["confidence"],
