@@ -437,6 +437,7 @@ BFCL_EXPERIMENTS=(
   "bfcl_tocf_taes_base|bfcl|data/bfcl_train.parquet,data/bfcl_eval_400.parquet"
   "bfcl_grpo_tpatch|bfcl|data/bfcl_train.parquet,data/bfcl_eval_400.parquet"
   "bfcl_grpo_apatch|bfcl|data/bfcl_train.parquet,data/bfcl_eval_400.parquet"
+  "bfcl_grpo_dense_t3rl|bfcl|data/bfcl_train.parquet,data/bfcl_eval_400.parquet"
   "bfcl_grpo_mfpatch|bfcl|data/bfcl_train.parquet,data/bfcl_eval_400.parquet"
   "bfcl_grpo_ta|bfcl|data/bfcl_train.parquet,data/bfcl_eval_400.parquet"
 )

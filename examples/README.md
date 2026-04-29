@@ -14,6 +14,7 @@ whether T-Patch and A-Patch help on top of GRPO before adding other modules.
 | `bfcl_grpo_tpatch.yaml` | GRPO + T-Patch only: adaptive task exposure. |
 | `bfcl_grpo_apatch.yaml` | GRPO + A-Patch only: tag-aware advantage scaling. |
 | `bfcl_grpo_ta.yaml` | GRPO + T-Patch + A-Patch together. |
+| `bfcl_grpo_dense_t3rl.yaml` | GRPO + dense per-turn T3RL/EnvTuning-style reward only. |
 | `bfcl_grpo_mfpatch.yaml` | GRPO + MF-Patch: EnvTuning-style missing-function transition protocol. |
 
 The diagnostic control uses `bfcl-dense-env` with `mode: capped` and
