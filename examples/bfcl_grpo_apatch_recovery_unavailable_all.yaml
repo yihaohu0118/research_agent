@@ -1,0 +1,30 @@
+# A-Patch + train-only unavailable-tool recovery notes across all categories.
+
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
+defaults:
+  - bfcl_tocf_taes_shared
+  - _self_
+
+trainer:
+  experiment_name: bfcl_grpo_apatch_recovery_unavailable_all
+
+env_service:
+  bfcl:
+    recovery_lite:
+      enable: true
+      apply_to_validation: false
+      mode: unavailable_only
+
+tocf:
+  persistence_dir: experiments/bfcl_grpo_module_ablation/apatch_recovery_unavailable_all/tocf_state
+  state:
+    dir: experiments/bfcl_grpo_module_ablation/apatch_recovery_unavailable_all/tocf_state
+  stats:
+    dump_dir: experiments/bfcl_grpo_module_ablation/apatch_recovery_unavailable_all/tocf_stats
+  advantage:
+    apatch:
+      enable: true
