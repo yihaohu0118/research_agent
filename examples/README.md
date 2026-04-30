@@ -25,6 +25,12 @@ whether T-Patch and A-Patch help on top of GRPO before adding other modules.
 | `bfcl_grpo_tpatch_rerun.yaml` | T-Patch reproducibility rerun. |
 | `bfcl_grpo_ta_category_budget.yaml` | Simultaneous category-only T-Patch + budgeted residual A-Patch. |
 | `bfcl_grpo_ta_category_budget_mild.yaml` | Mild simultaneous category-only T-Patch + budgeted residual A-Patch. |
+| `bfcl_grpo_apatch_recovery_unavailable.yaml` | A-Patch + train-only unavailable-tool recovery notes. |
+| `bfcl_grpo_apatch_recovery_common.yaml` | A-Patch + train-only recovery notes for common execution/parser errors. |
+| `bfcl_grpo_apatch_observation_required.yaml` | A-Patch + train-only required/enum observation annotations. |
+| `bfcl_grpo_apatch_observation_typed.yaml` | A-Patch + train-only required/type/enum observation annotations. |
+| `bfcl_grpo_apatch_or_unavailable_required.yaml` | A-Patch + conservative recovery + observation annotations. |
+| `bfcl_grpo_apatch_or_common_typed.yaml` | A-Patch + broader recovery + typed observation annotations. |
 
 The diagnostic control uses `bfcl-dense-env` with `mode: capped` and
 `partial_credit_cap: 0.0`, so failed trajectories still receive reward `0.0`.
@@ -60,4 +66,12 @@ rerun and launch experiments 2/3/4 sequentially on one 4-GPU slice:
 
 ```bash
 bash scripts/launch_bfcl_coupled_234.sh
+```
+
+For the train-only environment-interface sweep:
+
+```bash
+bash scripts/launch_bfcl_env_lite_pair1.sh  # GPUs 0,1,2,3
+bash scripts/launch_bfcl_env_lite_pair2.sh  # GPUs 4,5,6,7
+bash scripts/launch_bfcl_env_lite_pair3.sh  # GPUs 8,9,10,11
 ```

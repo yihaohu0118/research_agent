@@ -1,0 +1,30 @@
+# A-Patch + train-only recovery notes for common execution/parser failures.
+
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
+defaults:
+  - bfcl_tocf_taes_shared
+  - _self_
+
+trainer:
+  experiment_name: bfcl_grpo_apatch_recovery_common
+
+env_service:
+  bfcl:
+    recovery_lite:
+      enable: true
+      apply_to_validation: false
+      mode: common_errors
+
+tocf:
+  persistence_dir: experiments/bfcl_grpo_module_ablation/apatch_recovery_common/tocf_state
+  state:
+    dir: experiments/bfcl_grpo_module_ablation/apatch_recovery_common/tocf_state
+  stats:
+    dump_dir: experiments/bfcl_grpo_module_ablation/apatch_recovery_common/tocf_stats
+  advantage:
+    apatch:
+      enable: true

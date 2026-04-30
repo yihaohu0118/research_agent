@@ -125,6 +125,17 @@ env_service:
       categories: ["multi_turn_miss_func"]
       force_advance_on_spurious_tool: true
       intercept_parse_error: true
+    recovery_lite:
+      enable: false
+      apply_to_validation: false
+      mode: unavailable_only
+    observation_lite:
+      enable: false
+      apply_to_validation: false
+      add_required_hint: true
+      add_type_hint: false
+      add_enum_hint: true
+      hide_optional: false
 
 # ── Trainer ───────────────────────────────────────────────────────────────────
 trainer:

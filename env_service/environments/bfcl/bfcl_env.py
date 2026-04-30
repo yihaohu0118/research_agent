@@ -17,6 +17,7 @@ limitations under the License.
 # environments/bfcl_env.py
 from __future__ import annotations
 import json, os
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List
 import re
@@ -338,6 +339,7 @@ class BfclEnv(BaseEnv):
 
         # 工具信息
         tools = self.test_entry.get("function", [])
+        presented_tools = self._apply_observation_lite(tools)
         # print("tools:", tools)
         self.tools_info = "Available tools:\n" + "\n".join(
             f"- {t.get('function', {}).get('name', 'unknown')}" for t in tools
@@ -356,11 +358,13 @@ class BfclEnv(BaseEnv):
         # function_docs = func_doc_language_specific_pre_processing(functions, test_category)
         # system_prompt = system_prompt_template.format(functions=function_docs)
         tool_prompt = tools_schema_to_qwen_prompt(
-            tools,
+            presented_tools,
             prompt_mode=self.params.get("tool_prompt_mode", "bfcl_qwen_fc"),
         )
         if self._mfpatch_enabled():
             tool_prompt = f"{tool_prompt}\n\n{self._mfpatch_instruction()}"
+        if self._observation_lite_enabled():
+            tool_prompt = f"{tool_prompt}\n\n{self._observation_lite_instruction()}"
         return {
             # system_prompt + "\n\n" + first_query
             "state": [
@@ -374,6 +378,8 @@ class BfclEnv(BaseEnv):
                 "tools_count": len(tools),
                 "questions_count": len(self.original_test_entry.get("question", [])),
                 "mf_patch": bool(self._mfpatch_enabled()),
+                "recovery_lite": bool(self._recovery_lite_enabled()),
+                "observation_lite": bool(self._observation_lite_enabled()),
             },
         }
 
@@ -440,7 +446,9 @@ class BfclEnv(BaseEnv):
             assistant_entry["tool_calls"] = []
             return StateMessage(
                 role="user",
-                content=f"[ERROR] Invalid tool call format: {parse_error}",
+                content=self._apply_recovery_lite(
+                    f"[ERROR] Invalid tool call format: {parse_error}"
+                ),
             )
 
         # ➜ 必须有已初始化的 handler
@@ -495,10 +503,137 @@ class BfclEnv(BaseEnv):
                 # 2. [{"role": "env", "content": f"[ERROR] {error_message}"}]
                 next_msg_content = msg.get("content", "")
 
+        next_msg_content = self._apply_recovery_lite(next_msg_content)
+
         return (
             StateMessage(role="user",content=next_msg_content)
              ###### changed by czy0718, without tool_role, trajectory.steps cannot be converted by tool_execution_results
         )
+
+    def _train_only_enabled(self, cfg: Dict[str, Any]) -> bool:
+        if not bool(cfg.get("enable", False)):
+            return False
+        mode = str(self.params.get("rollout_mode", "") or "").lower()
+        if mode in {"validate", "validation", "val", "test"} and not bool(
+            cfg.get("apply_to_validation", False)
+        ):
+            return False
+        categories = cfg.get("categories", None)
+        if isinstance(categories, str):
+            categories = [categories]
+        if categories:
+            category = self._test_category()
+            if category not in set(str(item) for item in categories):
+                return False
+        return True
+
+    def _recovery_lite_config(self) -> Dict[str, Any]:
+        cfg = self.params.get("recovery_lite")
+        return cfg if isinstance(cfg, dict) else {}
+
+    def _recovery_lite_enabled(self) -> bool:
+        return self._train_only_enabled(self._recovery_lite_config())
+
+    def _apply_recovery_lite(self, content: str) -> str:
+        if not self._recovery_lite_enabled() or not isinstance(content, str):
+            return content
+
+        cfg = self._recovery_lite_config()
+        mode = str(cfg.get("mode", "unavailable_only") or "unavailable_only")
+        lower = content.lower()
+        hint = ""
+        if "not available in the current tool list" in lower or (
+            "tool" in lower and "not available" in lower
+        ):
+            hint = (
+                "Environment recovery note: this tool is not available in the "
+                "current tool list. Do not retry unavailable or similar tools; "
+                "continue with feasible steps or answer in plain text when no "
+                "valid tool can satisfy the request."
+            )
+        elif mode == "common_errors":
+            if "invalid tool call format" in lower:
+                hint = (
+                    "Environment recovery note: emit each tool call as exactly "
+                    "one JSON object inside <tool_call></tool_call>, with "
+                    "'name' and object-valued 'arguments'."
+                )
+            elif "missing" in lower and ("argument" in lower or "parameter" in lower):
+                hint = (
+                    "Environment recovery note: a required argument is missing. "
+                    "Check the required parameters in the current tool schema "
+                    "before retrying."
+                )
+            elif "no such directory" in lower or "not found" in lower:
+                hint = (
+                    "Environment recovery note: the requested resource was not "
+                    "found. Inspect the current environment state with available "
+                    "listing/search tools before retrying."
+                )
+
+        if not hint:
+            return content
+        template = str(cfg.get("template", "{content}\n{hint}") or "{content}\n{hint}")
+        return template.format(content=content, hint=hint)
+
+    def _observation_lite_config(self) -> Dict[str, Any]:
+        cfg = self.params.get("observation_lite")
+        return cfg if isinstance(cfg, dict) else {}
+
+    def _observation_lite_enabled(self) -> bool:
+        return self._train_only_enabled(self._observation_lite_config())
+
+    def _observation_lite_instruction(self) -> str:
+        cfg = self._observation_lite_config()
+        return str(
+            cfg.get(
+                "instruction",
+                "Observation note: parameters marked [required] must be "
+                "provided exactly when calling a tool; do not invent tools "
+                "outside the current schema.",
+            )
+        ).strip()
+
+    def _apply_observation_lite(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not self._observation_lite_enabled():
+            return tools
+
+        cfg = self._observation_lite_config()
+        add_required = bool(cfg.get("add_required_hint", True))
+        add_type = bool(cfg.get("add_type_hint", False))
+        add_enum = bool(cfg.get("add_enum_hint", True))
+        hide_optional = bool(cfg.get("hide_optional", False))
+
+        patched_tools = deepcopy(tools)
+        for tool in patched_tools:
+            func = tool.get("function", tool)
+            params = func.get("parameters", {}) or {}
+            props = params.get("properties", {}) or {}
+            required = set(params.get("required", []) or [])
+
+            if hide_optional:
+                for key in list(props.keys()):
+                    if key not in required:
+                        props.pop(key, None)
+
+            for name, spec in props.items():
+                if not isinstance(spec, dict):
+                    continue
+                desc = str(spec.get("description", "") or "")
+                additions: list[str] = []
+                if add_required and name in required and "[required]" not in desc:
+                    additions.append("[required]")
+                if add_type and spec.get("type") and "[type:" not in desc:
+                    additions.append(f"[type: {spec.get('type')}]")
+                enum_values = spec.get("enum")
+                if add_enum and enum_values and "Allowed values:" not in desc:
+                    additions.append(
+                        "Allowed values: " + ", ".join(str(v) for v in enum_values)
+                    )
+                if additions:
+                    spec["description"] = f"{desc} {' '.join(additions)}".strip()
+
+        return patched_tools
 
     def _mfpatch_config(self) -> Dict[str, Any]:
         cfg = self.params.get("mf_patch")

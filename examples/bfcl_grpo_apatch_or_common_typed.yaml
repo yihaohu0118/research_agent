@@ -1,0 +1,37 @@
+# A-Patch + broad recovery notes + typed observation annotations.
+
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
+defaults:
+  - bfcl_tocf_taes_shared
+  - _self_
+
+trainer:
+  experiment_name: bfcl_grpo_apatch_or_common_typed
+
+env_service:
+  bfcl:
+    recovery_lite:
+      enable: true
+      apply_to_validation: false
+      mode: common_errors
+    observation_lite:
+      enable: true
+      apply_to_validation: false
+      add_required_hint: true
+      add_type_hint: true
+      add_enum_hint: true
+      hide_optional: false
+
+tocf:
+  persistence_dir: experiments/bfcl_grpo_module_ablation/apatch_or_common_typed/tocf_state
+  state:
+    dir: experiments/bfcl_grpo_module_ablation/apatch_or_common_typed/tocf_state
+  stats:
+    dump_dir: experiments/bfcl_grpo_module_ablation/apatch_or_common_typed/tocf_stats
+  advantage:
+    apatch:
+      enable: true
