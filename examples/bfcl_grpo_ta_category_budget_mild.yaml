@@ -1,0 +1,55 @@
+# Mild simultaneous T+A with separated responsibilities.
+#
+# This is the lower-variance version of bfcl_grpo_ta_category_budget: category
+# reweighting is softer and A-Patch residual scales are kept closer to 1.0.
+
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
+defaults:
+  - bfcl_tocf_taes_shared
+  - _self_
+
+trainer:
+  experiment_name: bfcl_grpo_ta_category_budget_mild
+
+tocf:
+  persistence_dir: experiments/bfcl_grpo_module_ablation/ta_category_budget_mild/tocf_state
+  state:
+    dir: experiments/bfcl_grpo_module_ablation/ta_category_budget_mild/tocf_state
+  stats:
+    dump_dir: experiments/bfcl_grpo_module_ablation/ta_category_budget_mild/tocf_stats
+  task_distribution:
+    enable: true
+    failure_aware: false
+    tag_alpha: 0.0
+    task_alpha: 0.0
+    alpha: 0.45
+    min_weight: 0.75
+    max_weight: 1.5
+    prior_strength: 8.0
+    ema_beta: 0.35
+  advantage:
+    apatch:
+      enable: true
+      min_scale: 0.7
+      max_scale: 1.5
+      dynamic:
+        enable: false
+      tag_weights:
+        spurious_tool_call: 1.6
+        correct_abstention: 1.4
+        empty_turn_model_response: 1.25
+        state_mismatch: 1.0
+        response_mismatch: 0.95
+        instance_mismatch: 0.8
+        pass: 1.0
+      budget:
+        enable: true
+        strength: 0.5
+        min_scale: 0.8
+        max_scale: 1.25
+        normalize_mean: true
+        target_mean: 1.0

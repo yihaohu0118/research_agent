@@ -22,6 +22,9 @@ whether T-Patch and A-Patch help on top of GRPO before adding other modules.
 | `bfcl_grpo_ta_mild_t.yaml` | Mild T-Patch + default A-Patch. |
 | `bfcl_grpo_ta_mild_t_posonly.yaml` | Mild T-Patch + positive-only A-Patch. |
 | `bfcl_grpo_a_mfpatch_posonly.yaml` | MF-Patch + conservative positive-only A-Patch. |
+| `bfcl_grpo_tpatch_rerun.yaml` | T-Patch reproducibility rerun. |
+| `bfcl_grpo_ta_category_budget.yaml` | Simultaneous category-only T-Patch + budgeted residual A-Patch. |
+| `bfcl_grpo_ta_category_budget_mild.yaml` | Mild simultaneous category-only T-Patch + budgeted residual A-Patch. |
 
 The diagnostic control uses `bfcl-dense-env` with `mode: capped` and
 `partial_credit_cap: 0.0`, so failed trajectories still receive reward `0.0`.
@@ -50,4 +53,11 @@ Override the GPU slice when launching from another machine:
 
 ```bash
 GPU_SET=0,1,2,3 bash scripts/launch_bfcl_ablation_pair3.sh
+```
+
+For the current coupled T+A follow-up, skip the already-finished A-Patch
+rerun and launch experiments 2/3/4 sequentially on one 4-GPU slice:
+
+```bash
+bash scripts/launch_bfcl_coupled_234.sh
 ```

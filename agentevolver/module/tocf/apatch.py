@@ -41,6 +41,13 @@ Config path (all under ``tocf.advantage.apatch``):
     max_scale: float (default 2.0)
     apply_to: "all" | "positive_advantage" | "negative_advantage"
               (default "all")
+    budget:
+        enable: bool (default false)
+        min_scale: float (default min_scale)
+        max_scale: float (default max_scale)
+        strength: float (default 1.0)
+        normalize_mean: bool (default true)
+        target_mean: float (default 1.0)
     metric_prefix: str (default "tocf/apatch")
     tag_weights:
         spurious_tool_call: 2.0
@@ -150,6 +157,60 @@ def _trajectory_scale(
     return float(min(max_scale, max(min_scale, raw_scale)))
 
 
+def _apply_scale_budget(
+    scales: torch.Tensor,
+    active_indices: List[int],
+    cfg: Any,
+    fallback_min_scale: float,
+    fallback_max_scale: float,
+) -> Tuple[torch.Tensor, Dict[str, float]]:
+    """Optionally constrain A-Patch to a fixed per-batch gradient budget.
+
+    In coupled T+A runs, T-Patch already changes which tasks appear in the
+    batch.  If A-Patch then freely amplifies the same diagnosed failures, the
+    two modules can multiply the same signal and destabilize GRPO.  This
+    budget keeps A-Patch as a residual tag-level signal: scales are softened,
+    clamped, and optionally mean-normalized over tagged samples.
+    """
+    budget_cfg = _cfg_get(cfg, "budget", {}) or {}
+    if not bool(_cfg_get(budget_cfg, "enable", False)) or not active_indices:
+        return scales, {
+            "budget_enabled": 0.0,
+            "budget_mean_before": 1.0,
+            "budget_mean_after": 1.0,
+        }
+
+    idx = torch.tensor(active_indices, dtype=torch.long, device=scales.device)
+    selected = scales.index_select(0, idx)
+    mean_before = float(selected.mean().detach().cpu()) if selected.numel() else 1.0
+
+    strength = float(_cfg_get(budget_cfg, "strength", 1.0) or 1.0)
+    strength = max(0.0, strength)
+    budget_min = float(_cfg_get(budget_cfg, "min_scale", fallback_min_scale))
+    budget_max = float(_cfg_get(budget_cfg, "max_scale", fallback_max_scale))
+    if budget_min > budget_max:
+        budget_min, budget_max = budget_max, budget_min
+
+    selected = 1.0 + strength * (selected - 1.0)
+    selected = torch.clamp(selected, min=budget_min, max=budget_max)
+
+    normalize = bool(_cfg_get(budget_cfg, "normalize_mean", True))
+    target_mean = float(_cfg_get(budget_cfg, "target_mean", 1.0) or 1.0)
+    if normalize and selected.numel():
+        denom = selected.mean().clamp_min(1e-6)
+        selected = selected * (target_mean / denom)
+        selected = torch.clamp(selected, min=budget_min, max=budget_max)
+
+    mean_after = float(selected.mean().detach().cpu()) if selected.numel() else 1.0
+    scales = scales.clone()
+    scales.index_copy_(0, idx, selected)
+    return scales, {
+        "budget_enabled": 1.0,
+        "budget_mean_before": mean_before,
+        "budget_mean_after": mean_after,
+    }
+
+
 def apply_apatch_advantage_weighting(
     batch: Any,
     config: Any,
@@ -213,6 +274,7 @@ def apply_apatch_advantage_weighting(
     scale_sum = 0.0
     tag_count_total: Dict[str, int] = {}
     missing_tag_count = 0
+    active_indices: List[int] = []
 
     for idx in range(n_samples):
         extra = extras[idx] if idx < len(extras) else {}
@@ -227,9 +289,18 @@ def apply_apatch_advantage_weighting(
         scales[idx] = scale
         scaled_count += 1
         scale_sum += scale
+        active_indices.append(idx)
 
         for t in failure_tags:
             tag_count_total[t] = tag_count_total.get(t, 0) + 1
+
+    scales, budget_metrics = _apply_scale_budget(
+        scales,
+        active_indices,
+        cfg,
+        fallback_min_scale=min_scale,
+        fallback_max_scale=max_scale,
+    )
 
     # Apply scaling, respecting the ``apply_to`` mask.
     if apply_to == "positive_advantage":
@@ -246,6 +317,9 @@ def apply_apatch_advantage_weighting(
         f"{prefix}/scaled_count": float(scaled_count),
         f"{prefix}/missing_tag_count": float(missing_tag_count),
         f"{prefix}/mean_scale": scale_sum / scaled_count if scaled_count else 1.0,
+        f"{prefix}/budget_enabled": budget_metrics["budget_enabled"],
+        f"{prefix}/budget_mean_before": budget_metrics["budget_mean_before"],
+        f"{prefix}/budget_mean_after": budget_metrics["budget_mean_after"],
         f"{prefix}/dynamic_enabled": 1.0 if dynamic_enabled and capability_state is not None else 0.0,
     }
     total_tags = sum(tag_count_total.values())

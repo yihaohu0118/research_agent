@@ -1,0 +1,41 @@
+# Simultaneous T+A with separated responsibilities.
+#
+# T-Patch is restricted to category-level task exposure. A-Patch handles
+# tag-level diagnostic gradients, but its scales are batch-budgeted so T and A
+# cannot multiply the same failure signal without bound.
+
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
+defaults:
+  - bfcl_tocf_taes_shared
+  - _self_
+
+trainer:
+  experiment_name: bfcl_grpo_ta_category_budget
+
+tocf:
+  persistence_dir: experiments/bfcl_grpo_module_ablation/ta_category_budget/tocf_state
+  state:
+    dir: experiments/bfcl_grpo_module_ablation/ta_category_budget/tocf_state
+  stats:
+    dump_dir: experiments/bfcl_grpo_module_ablation/ta_category_budget/tocf_stats
+  task_distribution:
+    enable: true
+    failure_aware: false
+    tag_alpha: 0.0
+    task_alpha: 0.0
+  advantage:
+    apatch:
+      enable: true
+      dynamic:
+        enable: false
+      budget:
+        enable: true
+        strength: 0.75
+        min_scale: 0.7
+        max_scale: 1.4
+        normalize_mean: true
+        target_mean: 1.0
