@@ -12,12 +12,21 @@ defaults:
 trainer:
   experiment_name: bfcl_grpo_apatch_observation_required_nrehiew_llama31_8b
 
+data:
+  max_response_length: 1024
+
 actor_rollout_ref:
   model:
     path: nreHieW/Llama-3.1-8B-Instruct
+  rollout:
+    response_length: ${data.max_response_length}
+    max_model_len: 12288
+    multi_turn:
+      max_steps: 10
 
 env_service:
   bfcl:
+    tool_prompt_mode: bfcl_llama_single_fc
     observation_lite:
       enable: true
       apply_to_validation: false
