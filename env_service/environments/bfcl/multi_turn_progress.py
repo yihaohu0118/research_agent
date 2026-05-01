@@ -64,8 +64,6 @@ def compute_per_turn_progress(
     test_entry: Dict[str, Any],
     test_category: str,
     model_name: str,
-    forced_spurious_turns: Optional[List[int]] = None,
-    forced_abstention_turns: Optional[List[int]] = None,
 ) -> Dict[str, Any]:
     """Score a multi-turn trajectory at per-user-turn granularity.
 
@@ -76,8 +74,7 @@ def compute_per_turn_progress(
       - ``progress_with_irrelevance``: float in [0, 1]. T3RL-style metric
         that ALSO scores irrelevance turns: 1.0 if the model correctly
         abstained (no decoded tool calls), 0.0 if it wrongly attempted
-        tool calls. This is the dense signal preferred by the F-Patch
-        grader in ``mode: t3rl`` because it directly rewards the correct
+        tool calls. This diagnostic signal directly measures the correct
         behaviour on ``multi_turn_miss_func`` turns.
       - ``per_turn_valid``: list[Optional[bool]]. One entry per GT turn.
           * True  -> model matched GT state and response at this turn
@@ -126,8 +123,6 @@ def compute_per_turn_progress(
     )
 
     decoded_model_turns = _decode_model_turns(handler, multi_turn_model_result_list)
-    forced_spurious = set(forced_spurious_turns or [])
-    forced_abstention = set(forced_abstention_turns or [])
 
     # If trajectory was force-terminated, pad missing turns with empty decoded
     # lists so that those turns are graded as failures against their GT.
@@ -194,23 +189,17 @@ def compute_per_turn_progress(
         all_turn_model_execution_results.extend(single_turn_model_execution_results)
 
         # GT-empty turn. Legacy ``progress`` excludes it (per_turn_valid=None),
-        # but we ALSO emit a T3RL-style irrelevance score so that the F-Patch
-        # grader can reward the correct behaviour of *not* calling tools on
-        # multi_turn_miss_func reveal turns.
+        # but we ALSO emit a T3RL-style irrelevance score to expose the
+        # behaviour of *not* calling tools on multi_turn_miss_func reveal turns.
         #
         # Score mirrors t3rl/envs/bfcl_gym.py:_step_on_answer in training mode:
         #   - 1.0  iff model emitted no decoded tool calls this turn
         #   - 0.0  iff model still tried to call tools despite the empty GT
         if not single_turn_gt:
             per_turn_valid.append(None)
-            if turn_index in forced_spurious:
-                model_attempted_tools = True
-            elif turn_index in forced_abstention:
-                model_attempted_tools = False
-            else:
-                model_attempted_tools = bool(single_turn_model) and not is_empty_execute_response(
-                    single_turn_model
-                )
+            model_attempted_tools = bool(single_turn_model) and not is_empty_execute_response(
+                single_turn_model
+            )
             irr_score = 0.0 if model_attempted_tools else 1.0
             irrelevance_per_turn.append(irr_score)
             errors_per_turn.append(None)
@@ -310,8 +299,6 @@ def compute_per_turn_progress(
         "scorable_turns": scorable_turns,
         "passed_irrelevance_turns": passed_irrelevance_turns,
         "irrelevance_turns": irrelevance_turns,
-        "forced_spurious_turns": sorted(forced_spurious),
-        "forced_abstention_turns": sorted(forced_abstention),
         "terminated_early": terminated_early,
         "errors_per_turn": errors_per_turn,
     }
@@ -345,8 +332,6 @@ def safe_compute_progress(
             test_entry=prompt_entry,
             test_category=test_category,
             model_name=model_name,
-            forced_spurious_turns=model_result_data.get("mfpatch_spurious_turns", []),
-            forced_abstention_turns=model_result_data.get("mfpatch_abstention_turns", []),
         )
         return float(info.get("progress", 0.0)), info
     except Exception as e:

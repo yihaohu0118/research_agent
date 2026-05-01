@@ -1,5 +1,5 @@
 # Primary entry: sets hydra.searchpath, then composes bfcl_tocf_taes_shared.yaml.
-# Apatch/tpatch experiments should default to bfcl_tocf_taes_shared (not this file)
+# A-Patch experiments should default to bfcl_tocf_taes_shared (not this file)
 # so Hydra does not see searchpath in a non-primary composed config.
 
 hydra:

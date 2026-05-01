@@ -119,16 +119,6 @@ env_service:
     enforce_available_tools: true
     tool_prompt_mode: bfcl_qwen_fc
     tool_result_mode: bfcl_tool_response
-    mf_patch:
-      enable: false
-      apply_to_validation: false
-      categories: ["multi_turn_miss_func"]
-      force_advance_on_spurious_tool: true
-      intercept_parse_error: true
-    recovery_lite:
-      enable: false
-      apply_to_validation: false
-      mode: unavailable_only
     observation_lite:
       enable: false
       apply_to_validation: false

@@ -1,83 +1,41 @@
 # BFCL Experiment Configs
 
-This folder keeps the active BFCL configs focused on module attribution over
-the original BFCL tasks. The active ladder is intentionally small: prove
-whether T-Patch and A-Patch help on top of GRPO before adding other modules.
+This folder keeps only the active BFCL configs for the current paper path:
+strict GRPO controls, verifier-diagnostic plumbing, the working advantage
+reweighting module, and the working observation-interface module.
 
-## Strict GRPO + Module Ladder
+## Active Configs
 
 | Config | Role |
 | --- | --- |
 | `bfcl_grpo.yaml` | Launchable sparse GRPO baseline. |
 | `bfcl_grpo_base.yaml` | Shared sparse GRPO training base. |
-| `bfcl_tocf_taes_base.yaml` | Diagnostic control: GRPO reward stays binary, BFCL failure tags are collected, T/A/E/S all off. |
-| `bfcl_grpo_tpatch.yaml` | GRPO + T-Patch only: adaptive task exposure. |
-| `bfcl_grpo_apatch.yaml` | GRPO + A-Patch only: tag-aware advantage scaling. |
-| `bfcl_grpo_ta.yaml` | GRPO + T-Patch + A-Patch together. |
-| `bfcl_grpo_dense_t3rl.yaml` | GRPO + dense per-turn T3RL/EnvTuning-style reward only. |
-| `bfcl_grpo_mfpatch.yaml` | GRPO + MF-Patch: EnvTuning-style missing-function transition protocol. |
-| `bfcl_grpo_apatch_rerun.yaml` | A-Patch reproducibility rerun. |
-| `bfcl_grpo_apatch_posonly.yaml` | A-Patch, positive advantages only. |
-| `bfcl_grpo_apatch_posonly_mild.yaml` | A-Patch positive-only with softer tag weights. |
-| `bfcl_grpo_ta_mild_t.yaml` | Mild T-Patch + default A-Patch. |
-| `bfcl_grpo_ta_mild_t_posonly.yaml` | Mild T-Patch + positive-only A-Patch. |
-| `bfcl_grpo_a_mfpatch_posonly.yaml` | MF-Patch + conservative positive-only A-Patch. |
-| `bfcl_grpo_tpatch_rerun.yaml` | T-Patch reproducibility rerun. |
-| `bfcl_grpo_ta_category_budget.yaml` | Simultaneous category-only T-Patch + budgeted residual A-Patch. |
-| `bfcl_grpo_ta_category_budget_mild.yaml` | Mild simultaneous category-only T-Patch + budgeted residual A-Patch. |
-| `bfcl_grpo_apatch_recovery_unavailable.yaml` | A-Patch + train-only unavailable-tool recovery notes. |
-| `bfcl_grpo_apatch_recovery_common.yaml` | A-Patch + train-only recovery notes for common execution/parser errors. |
-| `bfcl_grpo_apatch_observation_required.yaml` | A-Patch + train-only required/enum observation annotations. |
-| `bfcl_grpo_apatch_observation_typed.yaml` | A-Patch + train-only required/type/enum observation annotations. |
-| `bfcl_grpo_apatch_or_unavailable_required.yaml` | A-Patch + conservative recovery + observation annotations. |
-| `bfcl_grpo_apatch_or_common_typed.yaml` | A-Patch + broader recovery + typed observation annotations. |
-| `bfcl_grpo_apatch_recovery_unavailable_all.yaml` | A-Patch + unavailable-tool recovery notes across all categories. |
-| `bfcl_grpo_apatch_or_targeted.yaml` | A-Patch + targeted recovery for miss_func and required-parameter hints for miss_param. |
-| `bfcl_grpo_apatch_observation_required_rerun.yaml` | Reproducibility rerun for the strongest observation-interface setting. |
+| `bfcl_tocf_taes_base.yaml` | Diagnostic control: GRPO reward stays binary while BFCL failure tags are collected. |
+| `bfcl_tocf_taes_shared.yaml` | Shared diagnostic/A-Patch config body. |
+| `bfcl_grpo_apatch.yaml` | A-Patch only: diagnosis-guided advantage reweighting. |
+| `bfcl_grpo_apatch_rerun.yaml` | A-Patch reproducibility rerun; current strict best baseline. |
+| `bfcl_grpo_apatch_observation_required.yaml` | A-Patch + train-only required/enum observation annotations; current best environment-interface setting. |
+| `bfcl_grpo_apatch_observation_required_rerun.yaml` | Reproducibility rerun for the observation-interface setting. |
 | `bfcl_grpo_apatch_observation_required_nolc.yaml` | Observation-interface setting applied only outside long-context tasks. |
-
-The diagnostic control uses `bfcl-dense-env` with `mode: capped` and
-`partial_credit_cap: 0.0`, so failed trajectories still receive reward `0.0`.
-That keeps the reward identical to sparse GRPO while exposing failure tags for
-modules that need them.
 
 ## Scope
 
-- E-Patch, S-Patch, full TAES, and synthetic task generation are out of scope
-  for this active ladder.
-- `task_manager.n=0` and `synthetic_data_ratio=0.0` keep generation off for the
-  main configs.
+- Synthetic task generation, dense T3RL reward, T-Patch, MF-Patch,
+  recovery-lite variants, typed observation hints, and failed composition
+  sweeps have been removed from the active config set.
+- The strict setting keeps validation unchanged unless a config explicitly says
+  otherwise. Current active configs are train-time only for observation changes.
 
-## Pair Launch Scripts
+## Launch
 
-The tuning scripts run two experiments sequentially on one 4-GPU slice and
-print directly to the current terminal or tmux pane:
+Run the observation follow-up pair sequentially on one 4-GPU slice:
 
 ```bash
-bash scripts/launch_bfcl_ablation_pair1.sh  # GPUs 0,1,2,3
-bash scripts/launch_bfcl_ablation_pair2.sh  # GPUs 4,5,6,7
-bash scripts/launch_bfcl_ablation_pair3.sh  # GPUs 8,9,10,11
+bash scripts/launch_bfcl_observation_followup.sh
 ```
 
 Override the GPU slice when launching from another machine:
 
 ```bash
-GPU_SET=0,1,2,3 bash scripts/launch_bfcl_ablation_pair3.sh
-```
-
-For the current coupled T+A follow-up, skip the already-finished A-Patch
-rerun and launch experiments 2/3/4 sequentially on one 4-GPU slice:
-
-```bash
-bash scripts/launch_bfcl_coupled_234.sh
-```
-
-For the train-only environment-interface sweep:
-
-```bash
-bash scripts/launch_bfcl_env_lite_pair1.sh  # GPUs 0,1,2,3
-bash scripts/launch_bfcl_env_lite_pair2.sh  # GPUs 4,5,6,7
-bash scripts/launch_bfcl_env_lite_pair3.sh  # GPUs 8,9,10,11
-bash scripts/launch_bfcl_env_lite_pair4.sh  # GPUs 0,1,2,3 on an extra node by default
-bash scripts/launch_bfcl_observation_followup.sh  # GPUs 0,1,2,3 by default
+GPU_SET=0,1,2,3 bash scripts/launch_bfcl_observation_followup.sh
 ```

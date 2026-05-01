@@ -26,10 +26,6 @@ import uuid
 from env_service.base import BaseEnv
 from env_service.registry import Registry
 from env_service.trajectory import StateMessage, ActionMessage, ToolCall
-from bfcl_eval.utils import (
-    find_file_by_category,
-    load_file,
-)
 
 
 # 默认路径，可用环境变量覆盖
@@ -311,7 +307,6 @@ class BfclEnv(BaseEnv):
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.tools_info = ""
-        self._mfpatch_ground_truth: list[Any] = []
 
     # ------------------------------------------------------------------ #
     # 生命周期
@@ -322,9 +317,6 @@ class BfclEnv(BaseEnv):
             self.params.update(params)
         self.test_entry = self._load_test_case(self.data_path, self.task_id)
         self.original_test_entry = self.test_entry
-        self._mfpatch_ground_truth = self._load_possible_answer_ground_truth(
-            self.test_entry
-        )
 
         # 必须成功实例化真实 EnvHandler
         from env_service.environments.bfcl.env_handler import EnvHandler
@@ -361,8 +353,6 @@ class BfclEnv(BaseEnv):
             presented_tools,
             prompt_mode=self.params.get("tool_prompt_mode", "bfcl_qwen_fc"),
         )
-        if self._mfpatch_enabled():
-            tool_prompt = f"{tool_prompt}\n\n{self._mfpatch_instruction()}"
         if self._observation_lite_enabled():
             tool_prompt = f"{tool_prompt}\n\n{self._observation_lite_instruction()}"
         return {
@@ -377,8 +367,6 @@ class BfclEnv(BaseEnv):
                 "test_id": self.test_entry.get("id", "unknown"),
                 "tools_count": len(tools),
                 "questions_count": len(self.original_test_entry.get("question", [])),
-                "mf_patch": bool(self._mfpatch_enabled()),
-                "recovery_lite": bool(self._recovery_lite_enabled()),
                 "observation_lite": bool(self._observation_lite_enabled()),
             },
         }
@@ -436,8 +424,6 @@ class BfclEnv(BaseEnv):
         parse_error = assistant_entry.pop("_bfcl_parse_error", None)
 
         self.conversation_history.append(assistant_entry) ### change by czy0712
-        if self._mfpatch_should_intercept_empty_gt_turn(parse_error, assistant_entry):
-            return self._handle_mfpatch_empty_gt_turn(assistant_entry, parse_error)
 
         if parse_error:
             assistant_entry["_bfcl_rejected_tool_calls"] = assistant_entry.get(
@@ -446,9 +432,7 @@ class BfclEnv(BaseEnv):
             assistant_entry["tool_calls"] = []
             return StateMessage(
                 role="user",
-                content=self._apply_recovery_lite(
-                    f"[ERROR] Invalid tool call format: {parse_error}"
-                ),
+                content=f"[ERROR] Invalid tool call format: {parse_error}",
             )
 
         # ➜ 必须有已初始化的 handler
@@ -503,8 +487,6 @@ class BfclEnv(BaseEnv):
                 # 2. [{"role": "env", "content": f"[ERROR] {error_message}"}]
                 next_msg_content = msg.get("content", "")
 
-        next_msg_content = self._apply_recovery_lite(next_msg_content)
-
         return (
             StateMessage(role="user",content=next_msg_content)
              ###### changed by czy0718, without tool_role, trajectory.steps cannot be converted by tool_execution_results
@@ -526,55 +508,6 @@ class BfclEnv(BaseEnv):
             if category not in set(str(item) for item in categories):
                 return False
         return True
-
-    def _recovery_lite_config(self) -> Dict[str, Any]:
-        cfg = self.params.get("recovery_lite")
-        return cfg if isinstance(cfg, dict) else {}
-
-    def _recovery_lite_enabled(self) -> bool:
-        return self._train_only_enabled(self._recovery_lite_config())
-
-    def _apply_recovery_lite(self, content: str) -> str:
-        if not self._recovery_lite_enabled() or not isinstance(content, str):
-            return content
-
-        cfg = self._recovery_lite_config()
-        mode = str(cfg.get("mode", "unavailable_only") or "unavailable_only")
-        lower = content.lower()
-        hint = ""
-        if "not available in the current tool list" in lower or (
-            "tool" in lower and "not available" in lower
-        ):
-            hint = (
-                "Environment recovery note: this tool is not available in the "
-                "current tool list. Do not retry unavailable or similar tools; "
-                "continue with feasible steps or answer in plain text when no "
-                "valid tool can satisfy the request."
-            )
-        elif mode == "common_errors":
-            if "invalid tool call format" in lower:
-                hint = (
-                    "Environment recovery note: emit each tool call as exactly "
-                    "one JSON object inside <tool_call></tool_call>, with "
-                    "'name' and object-valued 'arguments'."
-                )
-            elif "missing" in lower and ("argument" in lower or "parameter" in lower):
-                hint = (
-                    "Environment recovery note: a required argument is missing. "
-                    "Check the required parameters in the current tool schema "
-                    "before retrying."
-                )
-            elif "no such directory" in lower or "not found" in lower:
-                hint = (
-                    "Environment recovery note: the requested resource was not "
-                    "found. Inspect the current environment state with available "
-                    "listing/search tools before retrying."
-                )
-
-        if not hint:
-            return content
-        template = str(cfg.get("template", "{content}\n{hint}") or "{content}\n{hint}")
-        return template.format(content=content, hint=hint)
 
     def _observation_lite_config(self) -> Dict[str, Any]:
         cfg = self.params.get("observation_lite")
@@ -635,155 +568,10 @@ class BfclEnv(BaseEnv):
 
         return patched_tools
 
-    def _mfpatch_config(self) -> Dict[str, Any]:
-        cfg = self.params.get("mf_patch")
-        if cfg is None:
-            cfg = self.params.get("miss_func_patch")
-        return cfg if isinstance(cfg, dict) else {}
-
-    def _mfpatch_enabled(self) -> bool:
-        cfg = self._mfpatch_config()
-        if not bool(cfg.get("enable", False)):
-            return False
-
-        mode = str(self.params.get("rollout_mode", "") or "").lower()
-        if mode in {"validate", "validation", "val", "test"} and not bool(
-            cfg.get("apply_to_validation", False)
-        ):
-            return False
-
-        category = self._test_category()
-        categories = cfg.get("categories", ["multi_turn_miss_func"])
-        if isinstance(categories, str):
-            categories = [categories]
-        if categories and category not in set(str(item) for item in categories):
-            return False
-        return True
-
     def _test_category(self) -> str:
         entry = self.test_entry or self.original_test_entry or {}
         test_id = str(entry.get("id") or self.task_id or "")
         return test_id.rsplit("_", 1)[0] if "_" in test_id else test_id
-
-    def _mfpatch_instruction(self) -> str:
-        cfg = self._mfpatch_config()
-        return str(
-            cfg.get(
-                "instruction",
-                "Missing-function rule: if the current user request cannot be "
-                "satisfied by any currently available function, do not call a "
-                "similar or unavailable tool. Respond briefly in plain text, "
-                "then wait for the next user instruction or newly provided tool "
-                "schema.",
-            )
-        ).strip()
-
-    def _mfpatch_current_turn_empty_gt(self) -> bool:
-        if self.current_turn < 0 or self.current_turn >= len(self._mfpatch_ground_truth):
-            return False
-        turn_gt = self._mfpatch_ground_truth[self.current_turn]
-        if turn_gt is None:
-            return True
-        if isinstance(turn_gt, (list, tuple, set, dict)):
-            return len(turn_gt) == 0
-        return False
-
-    def _mfpatch_should_intercept_empty_gt_turn(
-        self, parse_error: str | None, assistant_entry: Dict[str, Any]
-    ) -> bool:
-        if self.env_handler is None or self.original_test_entry is None:
-            return False
-        if not self._mfpatch_enabled():
-            return False
-        if not self._mfpatch_current_turn_empty_gt():
-            return False
-        if bool(self._mfpatch_config().get("intercept_parse_error", True)):
-            return True
-        return parse_error is None
-
-    def _handle_mfpatch_empty_gt_turn(
-        self,
-        assistant_entry: Dict[str, Any],
-        parse_error: str | None,
-    ) -> StateMessage:
-        """EnvTuning-style no-GT turn transition for BFCL miss_func.
-
-        Empty-GT turns are not tool-execution opportunities. A plain answer is
-        a correct abstention and moves to the next turn. Any tool attempt is
-        recorded as spurious, not executed, and also moves to the next turn.
-        """
-        tool_calls = assistant_entry.get("tool_calls", []) or []
-        attempted_tool = bool(parse_error) or bool(tool_calls)
-        outcome = "spurious_tool_call" if attempted_tool else "correct_abstention"
-        assistant_entry["_bfcl_mfpatch"] = {
-            "turn": int(self.current_turn),
-            "outcome": outcome,
-        }
-
-        if attempted_tool:
-            rejected = tool_calls if tool_calls else [{"error": parse_error or outcome}]
-            assistant_entry["_bfcl_mfpatch_spurious_tool_calls"] = rejected
-            assistant_entry["_bfcl_rejected_tool_calls"] = rejected
-            assistant_entry["tool_calls"] = []
-        else:
-            assistant_entry["_bfcl_mfpatch_correct_abstention"] = True
-
-        env_resp = self.env_handler.interact(
-            self.conversation_history,
-            self.original_test_entry,
-            enforce_available_tools=bool(
-                self.params.get("enforce_available_tools", True)
-            ),
-        )
-        if attempted_tool and bool(
-            self._mfpatch_config().get("force_advance_on_spurious_tool", True)
-        ):
-            env_resp = self._mfpatch_add_warning(env_resp)
-        return self._append_env_response(env_resp)
-
-    def _mfpatch_add_warning(self, env_resp: Dict[str, Any]) -> Dict[str, Any]:
-        messages = []
-        template = str(
-            self._mfpatch_config().get(
-                "warning_template",
-                "(SYSTEM WARNING: You should not call any function in this "
-                "turn because the required function description is missing in "
-                "the current tool list. Previous turn is forced quit. Current "
-                "function(s) will not be executed.) Next turn question:\n"
-                "{next_question}",
-            )
-        )
-        for msg in env_resp.get("messages", []):
-            msg = dict(msg)
-            if msg.get("role") == "user":
-                next_question = str(msg.get("content", "") or "")
-                try:
-                    msg["content"] = template.format(next_question=next_question)
-                except Exception:
-                    msg["content"] = f"{template}\n{next_question}"
-            messages.append(msg)
-        updated = dict(env_resp)
-        updated["messages"] = messages
-        return updated
-
-    def _load_possible_answer_ground_truth(
-        self, test_entry: Dict[str, Any]
-    ) -> list[Any]:
-        test_id = str(test_entry.get("id") or "")
-        category = test_id.rsplit("_", 1)[0] if "_" in test_id else test_id
-        try:
-            possible_answer_file = find_file_by_category(
-                category,
-                Path(self.answer_path),
-            )
-            possible_answer = load_file(possible_answer_file, sort_by_id=True)
-            for item in possible_answer:
-                if item.get("id") == test_id:
-                    gt = item.get("ground_truth", [])
-                    return gt if isinstance(gt, list) else []
-        except Exception:
-            return []
-        return []
 
     def evaluate(
         self,

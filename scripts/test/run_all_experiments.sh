@@ -429,17 +429,13 @@ APPWORLD_EXPERIMENTS=(
   "overall|appworld,reme|"
 )
 
-# BFCL strict module attribution ladder: baseline, diagnostic control,
-# one-module T/A/MF rows, then the T+A composition row. E/S/full TAES and
-# task generation are intentionally out of this active suite.
+# BFCL active ladder: baseline, diagnostic control, working A-Patch, and the
+# current observation-interface follow-up configs.
 BFCL_EXPERIMENTS=(
   "bfcl_grpo|bfcl|data/bfcl_train.parquet,data/bfcl_eval_400.parquet"
   "bfcl_tocf_taes_base|bfcl|data/bfcl_train.parquet,data/bfcl_eval_400.parquet"
-  "bfcl_grpo_tpatch|bfcl|data/bfcl_train.parquet,data/bfcl_eval_400.parquet"
   "bfcl_grpo_apatch|bfcl|data/bfcl_train.parquet,data/bfcl_eval_400.parquet"
-  "bfcl_grpo_dense_t3rl|bfcl|data/bfcl_train.parquet,data/bfcl_eval_400.parquet"
-  "bfcl_grpo_mfpatch|bfcl|data/bfcl_train.parquet,data/bfcl_eval_400.parquet"
-  "bfcl_grpo_ta|bfcl|data/bfcl_train.parquet,data/bfcl_eval_400.parquet"
+  "bfcl_grpo_apatch_observation_required|bfcl|data/bfcl_train.parquet,data/bfcl_eval_400.parquet"
 )
 
 SELECTED_EXPERIMENTS=()
