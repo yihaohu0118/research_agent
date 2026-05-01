@@ -1456,6 +1456,35 @@ class AgentEvolverRayPPOTrainer(RayPPOTrainer):
                                 self.tocf_stats.observe(tasks, trajectories, epoch, self.global_steps)
                                 if self.tocf_stats_metrics_enabled:
                                     metrics.update(self.tocf_stats.metrics())
+                                # Slot 3 (Diagnostic-Driven Schema Evolution) consumes
+                                # capability_state.json from the env workers. Persist it
+                                # mid-epoch so the evolved guidelines refresh fast enough
+                                # to matter on a 6-epoch run. ``save_every_n_steps=0``
+                                # (default) keeps legacy epoch-end-only behaviour.
+                                save_every_n_steps = 0
+                                try:
+                                    from omegaconf import OmegaConf as _OC
+                                    save_every_n_steps = int(
+                                        _OC.select(
+                                            self.config,
+                                            "tocf.state.save_every_n_steps",
+                                            default=0,
+                                        )
+                                        or 0
+                                    )
+                                except Exception:
+                                    save_every_n_steps = 0
+                                if (
+                                    self.tocf_state is not None
+                                    and save_every_n_steps > 0
+                                    and (self.global_steps % save_every_n_steps == 0)
+                                ):
+                                    try:
+                                        self.tocf_state.save()
+                                    except Exception as _e:
+                                        print(
+                                            f"[tocf] periodic save_every_n_steps failed: {_e}"
+                                        )
 
                             # ==================== E-Patch: ingest successful trajectories ====================
                             if self.experience_bank is not None:

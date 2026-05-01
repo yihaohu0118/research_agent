@@ -332,6 +332,12 @@ class BfclEnv(BaseEnv):
         # 工具信息
         tools = self.test_entry.get("function", [])
         presented_tools = self._apply_observation_lite(tools)
+        presented_tools = self._apply_diagnostic_evolution(presented_tools)
+        self._cached_tool_names = [
+            str((t.get("function", t) or {}).get("name") or "")
+            for t in presented_tools
+            if (t.get("function", t) or {}).get("name")
+        ]
         # print("tools:", tools)
         self.tools_info = "Available tools:\n" + "\n".join(
             f"- {t.get('function', {}).get('name', 'unknown')}" for t in tools
@@ -355,6 +361,9 @@ class BfclEnv(BaseEnv):
         )
         if self._observation_lite_enabled():
             tool_prompt = f"{tool_prompt}\n\n{self._observation_lite_instruction()}"
+        diag_block = self._diagnostic_evolution_system_block()
+        if diag_block:
+            tool_prompt = f"{tool_prompt}\n\n{diag_block}"
         return {
             # system_prompt + "\n\n" + first_query
             "state": [
@@ -430,9 +439,11 @@ class BfclEnv(BaseEnv):
                 "tool_calls", []
             )
             assistant_entry["tool_calls"] = []
+            err_text = f"[ERROR] Invalid tool call format: {parse_error}"
+            err_text = self._enrich_parse_error(err_text)
             return StateMessage(
                 role="user",
-                content=f"[ERROR] Invalid tool call format: {parse_error}",
+                content=err_text,
             )
 
         # ➜ 必须有已初始化的 handler
@@ -473,10 +484,12 @@ class BfclEnv(BaseEnv):
             self.conversation_history.append(msg)
             if msg["role"] == "tool":
                 # FIXME 改成一次性传入所有tool messages
-                next_msg_content += tool_message_to_qwen_text(
+                rendered = tool_message_to_qwen_text(
                     msg,
                     result_mode=self.params.get("tool_result_mode", "bfcl_tool_response"),
                 )
+                rendered = self._enrich_tool_response_text(rendered, msg)
+                next_msg_content += rendered
             elif msg["role"] == "user":
                 next_msg_content = msg.get("content", "")
                 # FIXME: yunpeng 更新新的tool schema到user msg里
@@ -567,6 +580,335 @@ class BfclEnv(BaseEnv):
                     spec["description"] = f"{desc} {' '.join(additions)}".strip()
 
         return patched_tools
+
+    # ------------------------------------------------------------------ #
+    # Tool Feedback Evolution (Slot 2)
+    # ------------------------------------------------------------------ #
+    # When the model emits an unparseable tool_call or the tool execution
+    # returns a structured error, the env replaces the terse default
+    # feedback with a richer diagnostic message. Train-only by default;
+    # gated by config block ``tool_feedback_evolution`` with the same
+    # ``apply_to_validation`` / ``categories`` semantics as observation_lite.
+    #
+    # The enrichment lives on the *reactive* env interface surface: it
+    # only fires when the model has already failed, so it cannot make
+    # successful trajectories worse. The same dense BFCL grader pipeline
+    # that A-Patch consumes still tags every turn unchanged.
+    def _tool_feedback_config(self) -> Dict[str, Any]:
+        cfg = self.params.get("tool_feedback_evolution")
+        return cfg if isinstance(cfg, dict) else {}
+
+    def _tool_feedback_enabled(self) -> bool:
+        return self._train_only_enabled(self._tool_feedback_config())
+
+    def _enrich_parse_error(self, base_text: str) -> str:
+        if not self._tool_feedback_enabled():
+            return base_text
+        cfg = self._tool_feedback_config()
+        max_tools = int(cfg.get("max_tool_names", 12) or 12)
+        names = list(getattr(self, "_cached_tool_names", []) or [])
+        if max_tools > 0 and len(names) > max_tools:
+            shown = names[:max_tools] + [f"... (+{len(names) - max_tools} more)"]
+        else:
+            shown = names
+        hints: list[str] = [base_text]
+        hints.append(
+            "[Hint] Each tool call MUST be a JSON object inside <tool_call>...</tool_call> "
+            'tags with both "name" and "arguments" keys, e.g. '
+            '<tool_call>{"name": "<tool>", "arguments": {"<arg>": <value>}}</tool_call>.'
+        )
+        if shown:
+            hints.append(
+                "[Hint] Available tools: " + ", ".join(shown) + "."
+            )
+        hints.append(
+            "[Hint] If no available tool can serve the user's request, reply in plain text "
+            "instead of producing a malformed tool_call."
+        )
+        return "\n".join(hints)
+
+    def _enrich_tool_response_text(
+        self, rendered: str, raw_msg: Dict[str, Any]
+    ) -> str:
+        """Append a per-error diagnostic hint when the tool returned an error."""
+        if not self._tool_feedback_enabled():
+            return rendered
+        content = raw_msg.get("content")
+        error_text = self._extract_tool_error_text(content)
+        if not error_text:
+            return rendered
+        cfg = self._tool_feedback_config()
+        tool_name = str(raw_msg.get("name") or raw_msg.get("tool_call_id") or "")
+        hint = self._diagnose_tool_error(tool_name, error_text, cfg)
+        if not hint:
+            return rendered
+        return rendered + f"[ToolHint] {hint}\n"
+
+    @staticmethod
+    def _extract_tool_error_text(content: Any) -> str:
+        if content is None:
+            return ""
+        if isinstance(content, dict):
+            err = content.get("error")
+            if isinstance(err, str):
+                return err
+            return ""
+        if isinstance(content, str):
+            text = content.strip()
+            if not text:
+                return ""
+            if text.startswith("{") and '"error"' in text:
+                try:
+                    parsed = json.loads(text)
+                    if isinstance(parsed, dict) and isinstance(parsed.get("error"), str):
+                        return parsed["error"]
+                except Exception:
+                    return ""
+            return ""
+        return ""
+
+    def _diagnose_tool_error(
+        self, tool_name: str, error_text: str, cfg: Dict[str, Any]
+    ) -> str:
+        """Pattern-match common tool errors and produce a 1-line fix hint.
+
+        The map intentionally targets the BFCL multi_turn failure modes that
+        A-Patch already weights highly (state/instance/missing-arg). Patterns
+        are conservative: when nothing matches the function returns "" and
+        the env behaves identically to the baseline.
+        """
+        text = (error_text or "").strip()
+        if not text:
+            return ""
+        lo = text.lower()
+        # 1) Argument errors (TypeError / missing-required-arg style)
+        m = re.search(
+            r"missing\s+\d+\s+required\s+(?:positional|keyword)\s+argument(?:s)?:\s*(.+)",
+            lo,
+        )
+        if m:
+            args = m.group(1).strip().rstrip(".")
+            return (
+                f"Required argument(s) {args} for `{tool_name}` were missing. "
+                "Re-emit the tool_call with these keys present in `arguments`."
+            )
+        m = re.search(r"unexpected\s+keyword\s+argument\s*['\"]?([\w_]+)", lo)
+        if m:
+            arg = m.group(1)
+            return (
+                f"`{tool_name}` does not accept argument `{arg}`. "
+                "Drop it and only use arguments listed in the tool schema."
+            )
+        # 2) Path / instance / state errors
+        if "no such directory" in lo or "no such file" in lo:
+            return (
+                f"The path you passed to `{tool_name}` does not exist in the current state. "
+                "Inspect the latest state with a read/list-style tool first, then retry."
+            )
+        if "you cannot use path" in lo or "use a single component" in lo:
+            return (
+                f"`{tool_name}` rejects multi-component paths. "
+                "Issue one navigation step at a time."
+            )
+        if "not authenticated" in lo or "login" in lo and "required" in lo:
+            return (
+                "An authentication step is required before this call can succeed. "
+                "Authenticate first, then retry."
+            )
+        if "tool not found" in lo or "no such tool" in lo or "unknown function" in lo:
+            names = list(getattr(self, "_cached_tool_names", []) or [])
+            shown = ", ".join(names[:8]) if names else ""
+            tail = f" Available tools start with: {shown}." if shown else ""
+            return (
+                f"`{tool_name}` is not in the available tool list."
+                f"{tail} If no listed tool matches the user's request, reply in plain text."
+            )
+        # 3) Type errors (catch-all)
+        if "expected" in lo and "got" in lo:
+            return (
+                f"`{tool_name}` rejected an argument type. "
+                "Re-check argument types in the tool schema (string vs int vs list)."
+            )
+        # 4) Generic short error: pass through as a one-line nudge.
+        if len(text) < 200:
+            return (
+                f"`{tool_name}` returned an error. "
+                "Re-read the tool's parameter schema and retry with corrected arguments."
+            )
+        return ""
+
+    # ------------------------------------------------------------------ #
+    # Diagnostic-Driven Schema Evolution (Slot 3)
+    # ------------------------------------------------------------------ #
+    # The env reads ``capability_state.json`` written by the trainer's
+    # TOCFCapabilityState. For every failure tag whose recent prevalence is
+    # high AND whose recent reward_mean is low, the env appends a one-line
+    # behavioral guideline to the system prompt. The guideline set therefore
+    # *evolves online* as training progresses: empty in epoch 0, growing
+    # with the agent's dominant failure modes, shrinking again as the
+    # agent masters them.
+    #
+    # This is "interface evolution driven by the same diagnostic signal
+    # that A-Patch consumes for advantage scaling" — i.e. the
+    # co-evolution loop made concrete.
+    _DEFAULT_GUIDELINES: Dict[str, str] = {
+        "spurious_tool_call": (
+            "[Cautious-call] If no available function clearly matches the user's request, "
+            "respond in plain text rather than fabricating a tool call."
+        ),
+        "empty_turn_model_response": (
+            "[Active-respond] When the user's request CAN be served by an available "
+            "function, you MUST emit a tool_call rather than only replying in plain text."
+        ),
+        "state_mismatch": (
+            "[State-aware] Before issuing a state-mutating call, re-read the most "
+            "recent tool results to confirm the current state matches what the "
+            "arguments assume."
+        ),
+        "instance_mismatch": (
+            "[Scope] Verify that the instance/target your call refers to actually "
+            "appeared in earlier tool results before calling on it."
+        ),
+        "response_mismatch": (
+            "[Format] Match your final reply to the format implied by the user's "
+            "request: lists, units, exact strings, ordering."
+        ),
+    }
+    _STATE_CACHE_TTL_SECONDS: float = 30.0
+
+    def _diagnostic_evolution_config(self) -> Dict[str, Any]:
+        cfg = self.params.get("diagnostic_evolution")
+        return cfg if isinstance(cfg, dict) else {}
+
+    def _diagnostic_evolution_enabled(self) -> bool:
+        return self._train_only_enabled(self._diagnostic_evolution_config())
+
+    @classmethod
+    def _read_capability_state(cls, path: str) -> Dict[str, Any] | None:
+        if not path:
+            return None
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            return None
+        cache = getattr(cls, "_capability_state_cache", None)
+        import time as _time
+        now = _time.time()
+        if (
+            isinstance(cache, dict)
+            and cache.get("path") == path
+            and cache.get("mtime") == mtime
+            and (now - cache.get("read_at", 0.0)) < cls._STATE_CACHE_TTL_SECONDS
+        ):
+            return cache.get("data")
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, json.JSONDecodeError):
+            return None
+        cls._capability_state_cache = {
+            "path": path,
+            "mtime": mtime,
+            "read_at": now,
+            "data": data,
+        }
+        return data
+
+    def _select_active_guidelines(self) -> List[str]:
+        cfg = self._diagnostic_evolution_config()
+        state_path = str(cfg.get("state_path") or "").strip()
+        if not state_path:
+            return []
+        data = self._read_capability_state(state_path)
+        if not data:
+            return []
+        # Source preference: window_tags (recent), fallback to total_tags.
+        window_tags = data.get("window_tags") or {}
+        total_tags = data.get("total_tags") or {}
+        source = window_tags if window_tags else total_tags
+        if not isinstance(source, dict) or not source:
+            return []
+
+        prev_thresh = float(cfg.get("prevalence_threshold", 0.10) or 0.10)
+        reward_thresh = float(cfg.get("reward_threshold", 0.6) or 0.6)
+        min_count = int(cfg.get("min_tag_count", 8) or 8)
+        max_lines = int(cfg.get("max_lines", 3) or 3)
+        category_scope = cfg.get("category_tags")  # optional category filter
+
+        # Optionally narrow source via category-specific tags.
+        if category_scope:
+            cat_source = data.get("window_category_tags") or data.get("total_category_tags") or {}
+            if isinstance(cat_source, dict):
+                target_cat = self._test_category()
+                merged: Dict[str, Dict[str, Any]] = {}
+                for key, stats in cat_source.items():
+                    if "::" not in key:
+                        continue
+                    cat, tag = key.split("::", 1)
+                    if cat != target_cat:
+                        continue
+                    merged[tag] = stats
+                if merged:
+                    source = merged
+
+        excluded = {"checker_error", "gt_error", "pass", "correct_abstention", "unknown"}
+        total_count = sum(
+            int((s or {}).get("count", 0) or 0)
+            for tag, s in source.items()
+            if tag not in excluded
+        )
+        if total_count <= 0:
+            return []
+
+        guidelines = dict(self._DEFAULT_GUIDELINES)
+        custom = cfg.get("guidelines")
+        if isinstance(custom, dict):
+            for k, v in custom.items():
+                if isinstance(v, str) and v.strip():
+                    guidelines[str(k)] = v.strip()
+                elif v is None:
+                    guidelines.pop(str(k), None)
+
+        candidates: list[tuple[float, str, str]] = []
+        for tag, stats in source.items():
+            if tag in excluded or tag not in guidelines:
+                continue
+            count = int((stats or {}).get("count", 0) or 0)
+            if count < min_count:
+                continue
+            prevalence = float(count) / float(total_count)
+            reward_mean = float((stats or {}).get("reward_mean", 0.0) or 0.0)
+            if prevalence < prev_thresh:
+                continue
+            if reward_mean >= reward_thresh:
+                # Tag prevalent but already largely solved → no need to nag.
+                continue
+            pressure = prevalence * (1.0 - reward_mean)
+            candidates.append((pressure, tag, guidelines[tag]))
+
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        selected = [g for _, _, g in candidates[: max(0, max_lines)]]
+        return selected
+
+    def _diagnostic_evolution_system_block(self) -> str:
+        if not self._diagnostic_evolution_enabled():
+            return ""
+        guidelines = self._select_active_guidelines()
+        if not guidelines:
+            return ""
+        header = "# Behavioral guidelines (env-evolved from recent failures):"
+        body = "\n".join(f"- {line}" for line in guidelines)
+        return f"{header}\n{body}"
+
+    def _apply_diagnostic_evolution(
+        self, tools: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        # Reserved for a future per-tool hook; today the diagnostic-driven
+        # annotation lives at system-prompt scope (see
+        # ``_diagnostic_evolution_system_block``). Returning the tools
+        # unchanged here keeps the call-site clean and the future per-tool
+        # extension a one-line swap.
+        return tools
 
     def _test_category(self) -> str:
         entry = self.test_entry or self.original_test_entry or {}
