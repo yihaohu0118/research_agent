@@ -551,7 +551,7 @@ class BfclEnv(BaseEnv):
                 "continue with feasible steps or answer in plain text when no "
                 "valid tool can satisfy the request."
             )
-        elif mode == "common_errors":
+        elif mode in {"common_errors", "error_guard", "domain_errors"}:
             if "invalid tool call format" in lower:
                 hint = (
                     "Environment recovery note: emit each tool call as exactly "
@@ -569,6 +569,56 @@ class BfclEnv(BaseEnv):
                     "Environment recovery note: the requested resource was not "
                     "found. Inspect the current environment state with available "
                     "listing/search tools before retrying."
+                )
+            elif "brake pedal needs to be pressed" in lower or (
+                "doors must be locked" in lower
+            ):
+                hint = (
+                    "Environment recovery note: the latest action failed because "
+                    "an engine-start precondition is not satisfied. Do not claim "
+                    "success or retry startEngine until the stated condition is "
+                    "resolved with available tools."
+                )
+            elif "cannot fill gas above" in lower or "tank capacity" in lower:
+                hint = (
+                    "Environment recovery note: the fuel action exceeded tank "
+                    "capacity. Check the current fuel level and only add the "
+                    "remaining capacity."
+                )
+            elif "price and amount must be positive" in lower:
+                hint = (
+                    "Environment recovery note: order price and amount must be "
+                    "strictly positive. Do not use zero as a placeholder."
+                )
+            elif "no available route" in lower or "distance not found" in lower:
+                hint = (
+                    "Environment recovery note: the travel query likely used a "
+                    "city name where an airport code or zipcode is required. "
+                    "Convert locations with available lookup tools before retrying."
+                )
+            elif "invalid access token" in lower or "user not authenticated" in lower:
+                hint = (
+                    "Environment recovery note: authentication is missing or "
+                    "invalid. Authenticate or retrieve the required credential "
+                    "before calling protected tools."
+                )
+            elif "booking not found" in lower or "card not registered" in lower:
+                hint = (
+                    "Environment recovery note: the referenced booking/card id "
+                    "is invalid or unavailable. Retrieve valid ids from available "
+                    "state/query tools before retrying."
+                )
+            elif mode in {"error_guard", "domain_errors"} and (
+                "[error]" in lower
+                or '"error"' in lower
+                or "error during execution" in lower
+                or lower.strip().startswith("error")
+            ):
+                hint = (
+                    "Environment recovery note: the latest tool response reports "
+                    "an error. Do not claim task success. Treat the error as a "
+                    "state constraint, fix it with available tools, and only retry "
+                    "after the stated issue is resolved."
                 )
 
         if not hint:

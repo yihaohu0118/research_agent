@@ -1,0 +1,34 @@
+# A-Patch + required/enum observation annotations in training and validation.
+# Diagnostic probe only: validation-time harness is intentionally patched.
+
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
+defaults:
+  - bfcl_tocf_taes_shared
+  - _self_
+
+trainer:
+  experiment_name: bfcl_grpo_apatch_observation_required_valpatch
+
+env_service:
+  bfcl:
+    observation_lite:
+      enable: true
+      apply_to_validation: true
+      add_required_hint: true
+      add_type_hint: false
+      add_enum_hint: true
+      hide_optional: false
+
+tocf:
+  persistence_dir: experiments/bfcl_grpo_module_ablation/apatch_observation_required_valpatch/tocf_state
+  state:
+    dir: experiments/bfcl_grpo_module_ablation/apatch_observation_required_valpatch/tocf_state
+  stats:
+    dump_dir: experiments/bfcl_grpo_module_ablation/apatch_observation_required_valpatch/tocf_stats
+  advantage:
+    apatch:
+      enable: true
