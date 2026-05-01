@@ -858,7 +858,57 @@ class HETActorRolloutRefWorker(Worker):
         if self._is_offload_param:
             load_fsdp_model_to_gpu(self.actor_module_fsdp)  # ⭐ Loads the FSDP model to GPU if offloading is enabled
 
-        self.checkpoint_manager.save_checkpoint(local_path=local_path, hdfs_path=hdfs_path, global_step=global_step, max_ckpt_to_keep=max_ckpt_to_keep)  # ⭐ Saves the checkpoint
+        try:
+            self.checkpoint_manager.save_checkpoint(
+                local_path=local_path,
+                hdfs_path=hdfs_path,
+                global_step=global_step,
+                max_ckpt_to_keep=max_ckpt_to_keep,
+            )  # ⭐ Saves the checkpoint
+        except OSError as exc:
+            # Some tool-tuned HF repos (e.g. watt-ai/watt-tool-8B) do not ship
+            # generation_config.json. verl's checkpoint manager treats that
+            # optional file as required after the FSDP shards have already been
+            # written, which can kill otherwise healthy runs at step 0. For
+            # those repos, emit a minimal fallback generation_config and keep
+            # the checkpoint/save barrier alive.
+            message = str(exc)
+            if "generation_config.json" not in message or "does not appear to have" not in message:
+                raise
+            if dist.get_rank() == 0:
+                try:
+                    from transformers import GenerationConfig
+
+                    model_config = getattr(
+                        getattr(self, "actor_module", None),
+                        "config",
+                        None,
+                    )
+                    if model_config is None:
+                        model_config = getattr(
+                            getattr(self, "actor_module_fsdp", None),
+                            "config",
+                            None,
+                        )
+                    generation_config = (
+                        GenerationConfig.from_model_config(model_config)
+                        if model_config is not None
+                        else GenerationConfig()
+                    )
+                    os.makedirs(local_path, exist_ok=True)
+                    generation_config.save_pretrained(local_path)
+                    log_with_rank(
+                        f"generation_config.json missing in source repo; "
+                        f"wrote fallback config to {local_path}",
+                        rank=dist.get_rank(),
+                        logger=logger,
+                        log_only_rank_0=True,
+                    )
+                except Exception as fallback_exc:
+                    warnings.warn(
+                        "Ignoring missing generation_config.json during "
+                        f"checkpoint save, but fallback write failed: {fallback_exc}"
+                    )
         dist.barrier()  # ⭐ Ensures all processes have completed the checkpoint save
 
         if self._is_lora and hasattr(getattr(self, "actor_module", self.actor_module_fsdp), "peft_config"):
