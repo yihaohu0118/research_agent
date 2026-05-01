@@ -34,6 +34,7 @@ import hydra
 import ray
 
 from agentevolver.module.task_manager.env_profiles import EnvProfile
+from agentevolver.utils.model_compat import ensure_chat_template_for_local_model
 from verl.trainer.ppo.reward import load_reward_manager
 
 from agentevolver.module.trainer.ae_ray_trainer import AgentEvolverRayPPOTrainer
@@ -278,6 +279,8 @@ class TaskRunner:
 
         # download the checkpoint from hdfs
         local_path = copy_to_local(config.actor_rollout_ref.model.path, use_shm=config.actor_rollout_ref.model.get('use_shm', False))  # ⭐ Download the model checkpoint to a local path
+        if ensure_chat_template_for_local_model(local_path):
+            print(f"[model_compat] wrote fallback chat_template to {local_path}/tokenizer_config.json")
 
         # instantiate tokenizer
         from verl.utils import hf_processor, hf_tokenizer

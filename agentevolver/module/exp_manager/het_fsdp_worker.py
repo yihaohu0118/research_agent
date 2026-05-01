@@ -67,6 +67,8 @@ from verl.utils.model import compute_position_id_with_mask
 from verl.utils.py_functional import convert_to_regular_types
 from verl.workers.sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManager
 
+from agentevolver.utils.model_compat import ensure_chat_template_for_local_model
+
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
@@ -233,6 +235,8 @@ class HETActorRolloutRefWorker(Worker):
 
         log_gpu_memory_usage(f"Before init {role} from HF AutoModel", logger=logger)
         local_path = model_path
+        if ensure_chat_template_for_local_model(local_path) and self.rank == 0:
+            print(f"[model_compat] wrote fallback chat_template to {local_path}/tokenizer_config.json")
 
         # note that we have to create model in fp32. Otherwise, the optimizer is in bf16, which is incorrect
         # TODO(zhangchi.usc1992): 1. support create from random initialized model. 2. Support init with FSDP directly
@@ -478,6 +482,8 @@ class HETActorRolloutRefWorker(Worker):
 
             log_gpu_memory_usage(f"Before building {rollout_name} rollout", logger=logger)
             local_path = copy_to_local(self.config.model.path, use_shm=self.config.model.get("use_shm", False))
+            if ensure_chat_template_for_local_model(local_path) and self.rank == 0:
+                print(f"[model_compat] wrote fallback chat_template to {local_path}/tokenizer_config.json")
             lora_kwargs = {"lora_kwargs": {"enable_lora": True, "max_loras": 1, "max_lora_rank": self._lora_rank}} if self._is_lora else {}
             # lora_kwargs = {}
             if vllm_mode == "customized":
