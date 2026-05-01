@@ -35,9 +35,6 @@ whether T-Patch and A-Patch help on top of GRPO before adding other modules.
 | `bfcl_grpo_apatch_or_targeted.yaml` | A-Patch + targeted recovery for miss_func and required-parameter hints for miss_param. |
 | `bfcl_grpo_apatch_observation_required_rerun.yaml` | Reproducibility rerun for the strongest observation-interface setting. |
 | `bfcl_grpo_apatch_observation_required_nolc.yaml` | Observation-interface setting applied only outside long-context tasks. |
-| `bfcl_grpo_apatch_observation_required_valpatch.yaml` | Diagnostic probe: required/enum observation annotations also applied in validation. |
-| `bfcl_grpo_apatch_recovery_error_guard_valpatch.yaml` | Diagnostic probe: domain error-recovery hints also applied in validation. |
-| `bfcl_grpo_apatch_domain_observation_valpatch.yaml` | Diagnostic probe: domain observation notes also applied in validation, excluding long-context tasks. |
 
 The diagnostic control uses `bfcl-dense-env` with `mode: capped` and
 `partial_credit_cap: 0.0`, so failed trajectories still receive reward `0.0`.
@@ -83,5 +80,4 @@ bash scripts/launch_bfcl_env_lite_pair2.sh  # GPUs 4,5,6,7
 bash scripts/launch_bfcl_env_lite_pair3.sh  # GPUs 8,9,10,11
 bash scripts/launch_bfcl_env_lite_pair4.sh  # GPUs 0,1,2,3 on an extra node by default
 bash scripts/launch_bfcl_observation_followup.sh  # GPUs 0,1,2,3 by default
-bash scripts/launch_bfcl_valpatch_probe.sh  # GPUs 0,1,2,3 by default
 ```
