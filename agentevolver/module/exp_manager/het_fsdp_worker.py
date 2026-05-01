@@ -224,7 +224,7 @@ class HETActorRolloutRefWorker(Worker):
         """
         from torch import optim
         from torch.distributed.fsdp import CPUOffload, MixedPrecision
-        from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForVision2Seq
+        from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForVision2Seq, GenerationConfig
 
         from verl.utils.model import get_generation_config, print_model_size, update_model_config
         from verl.utils.torch_dtypes import PrecisionType
@@ -247,6 +247,27 @@ class HETActorRolloutRefWorker(Worker):
 
         # override model kwargs
         actor_model_config = AutoConfig.from_pretrained(local_path, trust_remote_code=trust_remote_code, attn_implementation="flash_attention_2")
+
+        # Some tool-tuned repos omit generation_config.json. verl's FSDP
+        # checkpoint manager later calls GenerationConfig.from_pretrained on
+        # model_config.name_or_path during save. Materialize a local fallback
+        # before training starts, otherwise step-0 best-checkpointing can hang
+        # across ranks after one worker raises and others wait in barriers.
+        generation_config_path = os.path.join(str(local_path), "generation_config.json")
+        if os.path.isdir(str(local_path)) and not os.path.exists(generation_config_path):
+            try:
+                GenerationConfig.from_model_config(actor_model_config).save_pretrained(str(local_path))
+                if self.rank == 0:
+                    print(
+                        f"[checkpoint] wrote fallback generation_config.json to {generation_config_path}"
+                    )
+            except Exception as exc:
+                warnings.warn(
+                    f"Could not write fallback generation_config.json to {local_path}: {exc}"
+                )
+        if os.path.isdir(str(local_path)):
+            actor_model_config.name_or_path = str(local_path)
+            actor_model_config._name_or_path = str(local_path)
 
         # patch for kimi-vl
         if getattr(actor_model_config, "model_type", None) == "kimi_vl":
