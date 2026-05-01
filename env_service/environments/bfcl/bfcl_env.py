@@ -361,11 +361,16 @@ def tools_schema_to_qwen_prompt(tools_schema, prompt_mode: str = "bfcl_qwen_fc")
         lines.append("- If a tool call is needed, output ONLY the <tool_call> block and stop immediately.")
         lines.append("- Do not explain before or after a tool call.")
         lines.append("- Do not repeat the same tool call in a single message.")
-        lines.append("- Do not use placeholder values such as <booking_id_from_previous_step>; use exact values from prior tool responses.")
+        lines.append("- Do not invent placeholder values; use exact values from the user query or previous tool responses.")
         lines.append("- If no available tool can satisfy the user request, answer briefly in plain text without a tool call.")
-        lines.append("Tool-call format:")
+        # IMPORTANT: do NOT use angle-bracket placeholders here. Weaker base models
+        # (e.g. Llama-3.1-8B) tend to literally copy the placeholder syntax and emit
+        # XML-tag tool calls like <tool_call><find><name>config.py</name></find></tool_call>,
+        # which the strict parser rejects. Show a concrete JSON example instead.
+        lines.append("For each function call, return a JSON object with the function name and arguments inside <tool_call></tool_call> XML tags. The JSON object MUST have exactly two keys: \"name\" (string) and \"arguments\" (object).")
+        lines.append("Example tool call:")
         lines.append("<tool_call>")
-        lines.append('{"name": "<function-name>", "arguments": {"<arg>": <value>}}')
+        lines.append('{"name": "get_weather", "arguments": {"city": "Paris", "unit": "celsius"}}')
         lines.append("</tool_call>")
     elif prompt_mode == "toolace_fc":
         lines.append("Remember: output only a bracketed function-call list, e.g. [search(query=\"value\")].")
