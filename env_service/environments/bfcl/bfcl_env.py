@@ -387,6 +387,7 @@ class BfclEnv(BaseEnv):
         ### change by czy0712
         # action_msg = ActionMessage(**action)
         cur_turn=self.current_turn
+        self._last_step_info = {}
         state_msg = self.transition(action, params=params or {}) # change by czy0712
         # state_msg: role=<Role.USER: 'user'> content='' reasoning_content='' tool_calls=[ToolCall(...)] timestamp='2025-xxx' metadata={} tool_call_id=''
         terminated = self._is_terminated(state_msg.simple_dict["content"]) # change by czy0721
@@ -400,7 +401,7 @@ class BfclEnv(BaseEnv):
             "state": [state_msg.simple_dict],
             "reward": reward,
             "is_terminated": terminated,
-            "info": {},
+            "info": dict(getattr(self, "_last_step_info", {}) or {}),
         }
 
     def transition(
@@ -439,6 +440,12 @@ class BfclEnv(BaseEnv):
                 "tool_calls", []
             )
             assistant_entry["tool_calls"] = []
+            self._last_step_info = {
+                **dict(getattr(self, "_last_step_info", {}) or {}),
+                "bfcl_error_type": "parse_error",
+                "static_fission_retryable": True,
+                "static_fission_reason": parse_error,
+            }
             err_text = f"[ERROR] Invalid tool call format: {parse_error}"
             err_text = self._enrich_parse_error(err_text)
             return StateMessage(
@@ -488,6 +495,14 @@ class BfclEnv(BaseEnv):
                     msg,
                     result_mode=self.params.get("tool_result_mode", "bfcl_tool_response"),
                 )
+                error_text = self._extract_tool_error_text(msg.get("content"))
+                if error_text:
+                    self._last_step_info = {
+                        **dict(getattr(self, "_last_step_info", {}) or {}),
+                        "bfcl_error_type": "tool_error",
+                        "static_fission_retryable": True,
+                        "static_fission_reason": error_text,
+                    }
                 rendered = self._enrich_tool_response_text(rendered, msg)
                 next_msg_content += rendered
             elif msg["role"] == "user":

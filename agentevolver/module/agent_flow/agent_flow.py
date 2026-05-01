@@ -15,6 +15,7 @@ from agentevolver.module.context_manager.cmt_context_clip import SelfContextClip
 from agentevolver.module.agent_flow.reward_calculator import RewardCalculator
 from typing import Any, Dict, List, Union, Optional
 import threading
+from omegaconf import DictConfig
 from agentevolver.module.exp_manager.exp_manager import TrajExpConfig, ExperienceWorker
 
 
@@ -43,6 +44,52 @@ class AgentFlow(BaseAgentFlow):
         self.console_debug_mode: bool = self.config.actor_rollout_ref.rollout.debug_llm_io
         self.exp_worker = ExperienceWorker(config=self.config)
 
+    def _static_fission_config(self) -> Dict[str, Any]:
+        if self.config is None:
+            return {}
+        tocf_cfg = self.config.get("tocf", {}) or {}
+        cfg = tocf_cfg.get("static_fission", {}) or {}
+        return cfg if isinstance(cfg, (dict, DictConfig)) else {}
+
+    def _static_fission_enabled(self, traj_exp_config: TrajExpConfig) -> bool:
+        cfg = self._static_fission_config()
+        if not bool(cfg.get("enable", False)):
+            return False
+        mode = str(getattr(traj_exp_config, "mode", "") or "").lower()
+        if mode in {"validate", "validation", "val", "test"} and not bool(
+            cfg.get("apply_to_validation", False)
+        ):
+            return False
+        return True
+
+    def _static_fission_max_retries(self) -> int:
+        cfg = self._static_fission_config()
+        value = cfg.get("max_retries_per_trajectory", cfg.get("max_retries_per_turn", 1))
+        try:
+            return max(0, int(value))
+        except Exception:
+            return 1
+
+    def _append_static_fission_instruction(
+        self, content: str, info: Dict[str, Any]
+    ) -> str:
+        cfg = self._static_fission_config()
+        reason = str(info.get("static_fission_reason", "") or "").strip()
+        prompt = str(
+            cfg.get(
+                "prompt",
+                "[RECOVERY] The previous tool interaction failed. Re-read the "
+                "latest error, check available tools and required arguments, "
+                "then recover from the current state. Do not claim success "
+                "unless a tool result confirms success.",
+            )
+        ).strip()
+        if "{reason}" in prompt:
+            prompt = prompt.replace("{reason}", reason)
+        if not prompt:
+            return content
+        marker = "\n\n" if content else ""
+        return f"{content}{marker}{prompt}"
 
     def execute(self, context_manager, init_messages: List[dict], env: EnvClient, instance_id: str, tmux, stop, thread_index, task_id, traj_exp_config,data_id="", rollout_id="", query="", **kwargs) -> Linear_CMT:
         """
@@ -86,7 +133,11 @@ class AgentFlow(BaseAgentFlow):
         request_id: str = ""
         err_in_generating=False
         err_in_env = False
-        for act_step in range(self.max_steps):
+        act_step = 0
+        static_fission_enabled = self._static_fission_enabled(traj_exp_config)
+        static_fission_retries_used = 0
+        static_fission_max_retries = self._static_fission_max_retries()
+        while act_step < self.max_steps:
             # 2. 🔄 Update thread progress
             tmux['step'][thread_index] = act_step
             if (stop is not None) and stop[thread_index]: # Check if the thread should stop (because other threads have completed, making this thread useless)
@@ -144,12 +195,31 @@ class AgentFlow(BaseAgentFlow):
             # 8. 📥 save environment output
             state = env_output["state"]
             state.pop('tool_calls', None)
+            env_info = env_output.get("info", {}) or {}
+            use_static_fission_retry = (
+                static_fission_enabled
+                and bool(env_info.get("static_fission_retryable", False))
+                and static_fission_retries_used < static_fission_max_retries
+                and not bool(env_output.get("is_terminated", False))
+            )
+            if use_static_fission_retry:
+                state["content"] = self._append_static_fission_instruction(
+                    str(state.get("content", "") or ""),
+                    env_info,
+                )
+                static_fission_retries_used += 1
+                self.cmt.metadata["static_fission_retries"] = static_fission_retries_used
+                self.cmt.metadata["static_fission_last_error_type"] = env_info.get(
+                    "bfcl_error_type", ""
+                )
             self.cmt.save_env_output(state, input_msg_ref=step_input_message_arr, add_nothink=add_nothink)  # ⭐ Save the environment output
 
             # 9. 🔚 determine if the episode is terminated
             self.cmt.is_terminated = env_output["is_terminated"]
             if self.cmt.is_terminated or err_in_env:
                 break
+            if not use_static_fission_retry:
+                act_step += 1
 
         tmux['step'][thread_index] = -1
 

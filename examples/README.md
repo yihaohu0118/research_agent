@@ -17,6 +17,7 @@ reweighting module, and the working observation-interface module.
 | `bfcl_grpo_apatch_observation_required.yaml` | A-Patch + train-only required/enum observation annotations; current best environment-interface setting. |
 | `bfcl_grpo_apatch_observation_required_rerun.yaml` | Reproducibility rerun for the observation-interface setting. |
 | `bfcl_grpo_apatch_observation_required_nolc.yaml` | Observation-interface setting applied only outside long-context tasks. |
+| `bfcl_grpo_apatch_static_fission.yaml` | A-Patch + train-only static recovery continuations after parse/tool errors. |
 
 ## Scope
 
