@@ -32,7 +32,12 @@ from omegaconf import DictConfig, open_dict
 from peft import LoraConfig, TaskType, get_peft_model
 from safetensors.torch import save_file
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    ShardedOptimStateDictConfig,
+    ShardedStateDictConfig,
+    StateDictType,
+)
 
 import verl.utils.torch_functional as verl_F
 from verl import DataProto
@@ -885,6 +890,17 @@ class HETActorRolloutRefWorker(Worker):
         if self._is_offload_param:
             load_fsdp_model_to_gpu(self.actor_module_fsdp)  # ⭐ Loads the FSDP model to GPU if offloading is enabled
 
+        if bool(self.config.actor.checkpoint.get("fast_sharded_save", False)):
+            try:
+                self._save_checkpoint_fast_sharded(
+                    local_path=local_path,
+                    global_step=global_step,
+                )
+            finally:
+                if self._is_offload_param:
+                    offload_fsdp_model_to_cpu(self.actor_module_fsdp)
+            return
+
         try:
             self.checkpoint_manager.save_checkpoint(
                 local_path=local_path,
@@ -964,6 +980,130 @@ class HETActorRolloutRefWorker(Worker):
 
         if self._is_offload_param:
             offload_fsdp_model_to_cpu(self.actor_module_fsdp)  # ⭐ Offloads the FSDP model to CPU if offloading is enabled
+
+    def _save_checkpoint_fast_sharded(self, local_path: str, global_step: int = 0) -> None:
+        """Save a minimal FSDP sharded checkpoint and return immediately.
+
+        Some HF repos trigger hangs inside verl's checkpoint-manager post-save
+        path after all rank shards have already been written. This path keeps
+        the same shard filenames expected by verl loaders, writes lightweight
+        HF metadata on rank 0, and skips checkpoint registration/rotation.
+        """
+
+        from verl.utils.logger import log_with_rank
+
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+        os.makedirs(local_path, exist_ok=True)
+
+        save_contents = set(self.config.actor.checkpoint.get("save_contents", []))
+        sharded_state_config = ShardedStateDictConfig(offload_to_cpu=True)
+        sharded_optim_config = ShardedOptimStateDictConfig(offload_to_cpu=True)
+
+        with FSDP.state_dict_type(
+            self.actor_module_fsdp,
+            StateDictType.SHARDED_STATE_DICT,
+            sharded_state_config,
+            sharded_optim_config,
+        ):
+            if "model" in save_contents:
+                model_path = os.path.join(
+                    local_path,
+                    f"model_world_size_{world_size}_rank_{rank}.pt",
+                )
+                torch.save(self.actor_module_fsdp.state_dict(), model_path)
+                log_with_rank(
+                    f"[Rank {rank}] Fast-saved model to {model_path}",
+                    rank=rank,
+                    logger=logger,
+                    log_only_rank_0=False,
+                )
+
+            if "optimizer" in save_contents and self.actor_optimizer is not None:
+                optim_path = os.path.join(
+                    local_path,
+                    f"optim_world_size_{world_size}_rank_{rank}.pt",
+                )
+                optim_state = FSDP.optim_state_dict(
+                    self.actor_module_fsdp,
+                    self.actor_optimizer,
+                )
+                torch.save(optim_state, optim_path)
+                log_with_rank(
+                    f"[Rank {rank}] Fast-saved optim to {optim_path}",
+                    rank=rank,
+                    logger=logger,
+                    log_only_rank_0=False,
+                )
+
+            if "extra" in save_contents:
+                extra_path = os.path.join(
+                    local_path,
+                    f"extra_state_world_size_{world_size}_rank_{rank}.pt",
+                )
+                if hasattr(self.checkpoint_manager, "get_rng_state"):
+                    rng_state = self.checkpoint_manager.get_rng_state()
+                else:
+                    rng_state = None
+                extra_state = {
+                    "lr_scheduler": (
+                        self.actor_lr_scheduler.state_dict()
+                        if self.actor_lr_scheduler is not None
+                        else None
+                    ),
+                    "rng_state": rng_state,
+                    "global_step": global_step,
+                }
+                torch.save(extra_state, extra_path)
+                log_with_rank(
+                    f"[Rank {rank}] Fast-saved extra_state to {extra_path}",
+                    rank=rank,
+                    logger=logger,
+                    log_only_rank_0=False,
+                )
+
+        if rank == 0:
+            self._save_fast_checkpoint_hf_metadata(local_path)
+            log_with_rank(
+                f"[fast-checkpoint] completed sharded checkpoint at {local_path}",
+                rank=rank,
+                logger=logger,
+                log_only_rank_0=True,
+            )
+
+    def _save_fast_checkpoint_hf_metadata(self, local_path: str) -> None:
+        hf_path = os.path.join(local_path, "huggingface")
+        os.makedirs(hf_path, exist_ok=True)
+
+        model_config = getattr(getattr(self, "actor_module", None), "config", None)
+        if model_config is None:
+            model_config = getattr(getattr(self, "actor_module_fsdp", None), "config", None)
+
+        if model_config is not None and hasattr(model_config, "save_pretrained"):
+            model_config.save_pretrained(hf_path)
+
+        if self.tokenizer is not None and hasattr(self.tokenizer, "save_pretrained"):
+            self.tokenizer.save_pretrained(hf_path)
+
+        if self.processor is not None and hasattr(self.processor, "save_pretrained"):
+            self.processor.save_pretrained(hf_path)
+
+        generation_config = getattr(self, "generation_config", None)
+        if generation_config is None:
+            try:
+                from transformers import GenerationConfig
+
+                generation_config = (
+                    GenerationConfig.from_model_config(model_config)
+                    if model_config is not None
+                    else GenerationConfig()
+                )
+            except Exception:
+                generation_config = None
+
+        if generation_config is not None and hasattr(generation_config, "save_pretrained"):
+            generation_config.save_pretrained(local_path)
+            generation_config.save_pretrained(hf_path)
     
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def load_checkpoint(self, local_path, hdfs_path=None, del_local_after_load=False):

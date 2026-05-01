@@ -15,6 +15,12 @@ trainer:
 actor_rollout_ref:
   model:
     path: watt-ai/watt-tool-8B
+  actor:
+    checkpoint:
+      # Watt can write all rank shards successfully but hangs in verl's
+      # checkpoint-manager post-save path. Use the local fast sharded saver for
+      # this model so validation/best-checkpoint saves return cleanly.
+      fast_sharded_save: true
 
 env_service:
   bfcl:
