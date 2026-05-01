@@ -16,6 +16,7 @@ limitations under the License.
 
 # environments/bfcl_env.py
 from __future__ import annotations
+import ast
 import json, os
 from copy import deepcopy
 from pathlib import Path
@@ -51,7 +52,7 @@ At each turn, you should try your best to complete the tasks requested by the us
 
 
 def parse_assistant_content_to_tool_calls(
-    msg: Dict[str, Any], strict: bool = False
+    msg: Dict[str, Any], strict: bool = False, parser_mode: str = "xml_json"
 ) -> Dict[str, Any]:
     """
     从 assistant 的 content 中解析出 tool_calls，并返回新的消息结构。
@@ -78,6 +79,10 @@ def parse_assistant_content_to_tool_calls(
     has_tool_tag = "<tool_call" in content or "</tool_call>" in content
 
     if not matches:
+        if parser_mode == "toolace_fc":
+            toolace_result = parse_toolace_content_to_tool_calls(content, strict=strict)
+            if toolace_result.get("tool_calls") or toolace_result.get("_bfcl_parse_error"):
+                return toolace_result
         result = {
             "role": "assistant",
             "content": content.strip(),
@@ -146,6 +151,132 @@ def parse_assistant_content_to_tool_calls(
 
     return result
 
+
+def _toolace_ast_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        prefix = _toolace_ast_name(node.value)
+        return f"{prefix}.{node.attr}" if prefix else node.attr
+    return None
+
+
+def _toolace_literal(node: ast.AST) -> Any:
+    try:
+        return ast.literal_eval(node)
+    except Exception:
+        try:
+            return ast.unparse(node)
+        except Exception:
+            return None
+
+
+def _toolace_bracket_spans(content: str) -> list[tuple[int, int, str]]:
+    spans: list[tuple[int, int, str]] = []
+    depth = 0
+    start: int | None = None
+    in_string: str | None = None
+    escape = False
+    for idx, ch in enumerate(content):
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == in_string:
+                in_string = None
+            continue
+        if ch in {"'", '"'}:
+            in_string = ch
+            continue
+        if ch == "[":
+            if depth == 0:
+                start = idx
+            depth += 1
+        elif ch == "]" and depth > 0:
+            depth -= 1
+            if depth == 0 and start is not None:
+                snippet = content[start : idx + 1]
+                if "(" in snippet and ")" in snippet:
+                    spans.append((start, idx + 1, snippet))
+                start = None
+    return spans
+
+
+def parse_toolace_content_to_tool_calls(
+    content: str, strict: bool = False
+) -> Dict[str, Any]:
+    spans = _toolace_bracket_spans(content)
+    if not spans:
+        stripped = content.strip()
+        if stripped.startswith("[") or stripped.endswith("]"):
+            return {
+                "role": "assistant",
+                "content": content.strip(),
+                "tool_calls": [],
+                "_bfcl_parse_error": "Invalid ToolACE function-call list.",
+            }
+        return {"role": "assistant", "content": content.strip(), "tool_calls": []}
+
+    tool_calls: list[dict[str, Any]] = []
+    parse_errors: list[str] = []
+    call_id_counter = 1
+    consumed: list[tuple[int, int]] = []
+
+    for start, end, snippet in spans:
+        try:
+            parsed = ast.parse(snippet, mode="eval")
+        except SyntaxError as e:
+            parse_errors.append(f"Invalid ToolACE function-call syntax: {e.msg}")
+            continue
+        body = parsed.body
+        if isinstance(body, (ast.List, ast.Tuple)):
+            elements = body.elts
+        elif isinstance(body, ast.Call):
+            elements = [body]
+        else:
+            parse_errors.append("ToolACE output must be a list of function calls.")
+            continue
+        consumed.append((start, end))
+        for call in elements:
+            if not isinstance(call, ast.Call):
+                parse_errors.append("ToolACE list contains a non-call item.")
+                continue
+            func_name = _toolace_ast_name(call.func)
+            if not func_name:
+                parse_errors.append("ToolACE call has an invalid function name.")
+                continue
+            if strict and call.args:
+                parse_errors.append(f"Tool '{func_name}' uses positional arguments.")
+                continue
+            arguments: dict[str, Any] = {}
+            for kw in call.keywords:
+                if kw.arg is None:
+                    parse_errors.append(f"Tool '{func_name}' uses unsupported **kwargs.")
+                    continue
+                arguments[kw.arg] = _toolace_literal(kw.value)
+            tool_calls.append(
+                {
+                    "id": f"{func_name}_{call_id_counter}",
+                    "type": "function",
+                    "function": {
+                        "name": func_name,
+                        "arguments": arguments,
+                    },
+                }
+            )
+            call_id_counter += 1
+
+    cleaned = content
+    for start, end in reversed(consumed):
+        cleaned = cleaned[:start] + cleaned[end:]
+    cleaned = re.sub(r"\n\s*\n", "\n\n", cleaned).strip()
+
+    result = {"role": "assistant", "content": cleaned, "tool_calls": tool_calls}
+    if strict and parse_errors:
+        result["_bfcl_parse_error"] = "; ".join(parse_errors)
+    return result
+
 def tools_schema_to_qwen_prompt(tools_schema, prompt_mode: str = "bfcl_qwen_fc"):
     """
     将 tools_schema 转换为符合 Qwen 模型 chat_template 的工具描述 prompt。
@@ -179,6 +310,13 @@ def tools_schema_to_qwen_prompt(tools_schema, prompt_mode: str = "bfcl_qwen_fc")
         lines.append("# Tools\n")
         lines.append("You may call functions to assist with the user query.\n")
         lines.append("You are provided with function signatures within <tools></tools> XML tags:")
+    elif prompt_mode == "toolace_fc":
+        lines.append("You are an expert in composing functions. You are given a question and a set of possible functions. Based on the question, you will need to make one or more function/tool calls to achieve the purpose.")
+        lines.append("If none of the functions can be used, point it out. If the given question lacks the parameters required by the function, also point it out.")
+        lines.append("You should only return the function call in tools call sections.")
+        lines.append("If you decide to invoke any function(s), you MUST put them in the format of [func_name1(param_name1=param_value1, param_name2=param_value2), func_name2(param=value)].")
+        lines.append("You SHOULD NOT include any other text in the response.")
+        lines.append("Here is a list of functions in JSON format that you can invoke:")
     elif prompt_mode == "t3rl_text":
         lines.append(T3RL_BFCL_SYSTEM_PROMPT.strip())
         lines.append("\n\n# Tools\n")
@@ -192,6 +330,18 @@ def tools_schema_to_qwen_prompt(tools_schema, prompt_mode: str = "bfcl_qwen_fc")
         if prompt_mode == "bfcl_qwen_fc":
             # Match BFCL's QwenFCHandler prompt style as closely as possible.
             tool_json = json.dumps(tool)
+        elif prompt_mode == "toolace_fc":
+            func = tool.get("function", tool)
+            toolace_tool = {
+                "name": func.get("name"),
+                "description": func.get("description", ""),
+                "arguments": func.get("parameters", {}),
+            }
+            tool_json = json.dumps(
+                toolace_tool,
+                ensure_ascii=False,
+                separators=(',', ':')
+            )
         else:
             tool_json = json.dumps(
                 tool,
@@ -217,6 +367,8 @@ def tools_schema_to_qwen_prompt(tools_schema, prompt_mode: str = "bfcl_qwen_fc")
         lines.append("<tool_call>")
         lines.append('{"name": "<function-name>", "arguments": {"<arg>": <value>}}')
         lines.append("</tool_call>")
+    elif prompt_mode == "toolace_fc":
+        lines.append("Remember: output only a bracketed function-call list, e.g. [search(query=\"value\")].")
     elif prompt_mode != "t3rl_text":
         lines.append("Important: Always use only the latest tool list provided, ignoring any functions mentioned in previous messages.")
         lines.append("For each function call, return a json object with function name and arguments within <tool_call> and <tool_call> XML tags:")
@@ -446,6 +598,7 @@ class BfclEnv(BaseEnv):
         assistant_entry = parse_assistant_content_to_tool_calls(
             assistant_entry,
             strict=bool(self.params.get("strict_tool_parser", True)),
+            parser_mode=str(self.params.get("tool_call_parser", "xml_json")),
         )
         parse_error = assistant_entry.pop("_bfcl_parse_error", None)
 
