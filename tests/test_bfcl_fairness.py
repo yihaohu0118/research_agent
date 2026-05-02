@@ -8,6 +8,7 @@ try:
         parse_assistant_content_to_tool_calls,
         tool_message_to_qwen_text,
         tools_schema_to_llama31_official_prompt,
+        tools_schema_to_toolace_official_prompt,
         tools_schema_to_qwen_prompt,
     )
 except ModuleNotFoundError as exc:
@@ -17,6 +18,7 @@ except ModuleNotFoundError as exc:
     tool_message_to_qwen_text = None
     tools_schema_to_qwen_prompt = None
     tools_schema_to_llama31_official_prompt = None
+    tools_schema_to_toolace_official_prompt = None
 
 try:
     from env_service.environments.bfcl.env_handler import EnvHandler
@@ -36,6 +38,7 @@ def _require_bfcl_helpers() -> bool:
         and tool_message_to_qwen_text is not None
         and tools_schema_to_qwen_prompt is not None
         and tools_schema_to_llama31_official_prompt is not None
+        and tools_schema_to_toolace_official_prompt is not None
     )
 
 
@@ -202,6 +205,52 @@ def test_llama31_official_prompt_uses_raw_json_protocol():
     assert "<tool_response>" not in tool_text
 
 
+def test_toolace_official_prompt_uses_bfcl_python_protocol():
+    if not _require_bfcl_helpers():
+        return
+
+    parsed = parse_assistant_content_to_tool_calls(
+        {
+            "role": "assistant",
+            "content": '[search(query="value", top_k=3)]',
+        },
+        strict=True,
+        parser_mode="toolace_official_prompt",
+    )
+    parsed_bare = parse_assistant_content_to_tool_calls(
+        {
+            "role": "assistant",
+            "content": 'search(query="value")',
+        },
+        strict=True,
+        parser_mode="toolace_official_prompt",
+    )
+    prompt = tools_schema_to_toolace_official_prompt(
+        [
+            {
+                "name": "search",
+                "description": "Search tool.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            }
+        ]
+    )
+    tool_text = tool_message_to_qwen_text(
+        {"role": "tool", "content": {"ok": True}, "tool_call_id": "search_1"},
+        result_mode="toolace_official_prompt",
+    )
+
+    assert parsed["tool_calls"] == [_tool_call("search", {"query": "value", "top_k": 3})]
+    assert parsed_bare["tool_calls"] == [_tool_call("search", {"query": "value"})]
+    assert "[func_name1(" in prompt
+    assert "<tools>" not in prompt
+    assert "<tool_call>" not in prompt
+    assert "<tool_response>" not in tool_text
+
+
 def test_clean_trajectory_flags_tool_errors():
     if not _require_bfcl_eval():
         return
@@ -227,4 +276,5 @@ if __name__ == "__main__":
     test_bfcl_t3rl_protocol_stays_available()
     test_llama31_official_parser_accepts_raw_parameters_json()
     test_llama31_official_prompt_uses_raw_json_protocol()
+    test_toolace_official_prompt_uses_bfcl_python_protocol()
     test_clean_trajectory_flags_tool_errors()

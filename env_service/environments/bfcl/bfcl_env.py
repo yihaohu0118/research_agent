@@ -183,6 +183,8 @@ def parse_assistant_content_to_tool_calls(
 
     if parser_mode == "llama31_official_fc":
         return parse_llama31_official_content_to_tool_calls(content, strict=strict)
+    if parser_mode in {"toolace_fc", "toolace_official_prompt"}:
+        return parse_toolace_content_to_tool_calls(content, strict=strict)
 
     tool_calls = []
     remaining_content = content
@@ -195,10 +197,6 @@ def parse_assistant_content_to_tool_calls(
     has_tool_tag = "<tool_call" in content or "</tool_call>" in content
 
     if not matches:
-        if parser_mode == "toolace_fc":
-            toolace_result = parse_toolace_content_to_tool_calls(content, strict=strict)
-            if toolace_result.get("tool_calls") or toolace_result.get("_bfcl_parse_error"):
-                return toolace_result
         result = {
             "role": "assistant",
             "content": content.strip(),
@@ -325,14 +323,28 @@ def parse_toolace_content_to_tool_calls(
     spans = _toolace_bracket_spans(content)
     if not spans:
         stripped = content.strip()
-        if stripped.startswith("[") or stripped.endswith("]"):
-            return {
-                "role": "assistant",
-                "content": content.strip(),
-                "tool_calls": [],
-                "_bfcl_parse_error": "Invalid ToolACE function-call list.",
-            }
-        return {"role": "assistant", "content": content.strip(), "tool_calls": []}
+        if "<tool_call" in stripped or "</tool_call>" in stripped:
+            result = {"role": "assistant", "content": stripped, "tool_calls": []}
+            if strict:
+                result["_bfcl_parse_error"] = (
+                    "ToolACE BFCL prompt mode expects a Python function-call list, "
+                    'e.g. [search(query="value")], not <tool_call> tags.'
+                )
+            return result
+        if (
+            re.match(r"^[A-Za-z_][\w.]*\s*\(", stripped)
+            and stripped.endswith(")")
+        ):
+            spans = [(0, len(content), stripped)]
+        else:
+            if stripped.startswith("[") or stripped.endswith("]"):
+                return {
+                    "role": "assistant",
+                    "content": content.strip(),
+                    "tool_calls": [],
+                    "_bfcl_parse_error": "Invalid ToolACE function-call list.",
+                }
+            return {"role": "assistant", "content": content.strip(), "tool_calls": []}
 
     tool_calls: list[dict[str, Any]] = []
     parse_errors: list[str] = []
@@ -420,6 +432,32 @@ def tools_schema_to_llama31_official_prompt(
     return "\n".join(lines).strip()
 
 
+def tools_schema_to_toolace_official_prompt(
+    tools_schema: List[Dict[str, Any]],
+) -> str:
+    """BFCL official prompt-mode interface used for ToolACE/watt Llama models."""
+    function_docs = json.dumps(tools_schema, ensure_ascii=False, indent=4)
+    return (
+        "You are an expert in composing functions. You are given a question and a "
+        "set of possible functions. Based on the question, you will need to make "
+        "one or more function/tool calls to achieve the purpose.\n"
+        "If none of the functions can be used, point it out. If the given question "
+        "lacks the parameters required by the function, also point it out.\n"
+        "You should only return the function calls in your response.\n\n"
+        "If you decide to invoke any of the function(s), you MUST put it in the "
+        "format of [func_name1(params_name1=params_value1, "
+        "params_name2=params_value2...), func_name2(params)].\n"
+        "You SHOULD NOT include any other text in the response.\n\n"
+        "At each turn, you should try your best to complete the tasks requested "
+        "by the user within the current turn. Continue to output functions to call "
+        "until you have fulfilled the user's request to the best of your ability. "
+        "Once you have no more functions to call, the system will consider the "
+        "current turn complete and proceed to the next turn or task.\n\n"
+        "Here is a list of functions in JSON format that you can invoke.\n"
+        f"{function_docs}\n"
+    )
+
+
 def tools_schema_to_qwen_prompt(tools_schema, prompt_mode: str = "bfcl_qwen_fc"):
     """
     将 tools_schema 转换为符合 Qwen 模型 chat_template 的工具描述 prompt。
@@ -441,6 +479,9 @@ def tools_schema_to_qwen_prompt(tools_schema, prompt_mode: str = "bfcl_qwen_fc")
     Returns:
         str: 包含 <tools> 标签的完整 system 工具描述 prompt
     """
+    if prompt_mode == "toolace_official_prompt":
+        return tools_schema_to_toolace_official_prompt(tools_schema)
+
     if not tools_schema:
         return ""
 
@@ -544,7 +585,7 @@ def tool_message_to_qwen_text(tool_messages, result_mode: str = "bfcl_tool_respo
                 content_text = json.dumps(content, ensure_ascii=False)
             tool_entries.append(f"<tool_response>\n{content_text}\n</tool_response>")
             continue
-        if result_mode == "llama31_official":
+        if result_mode in {"llama31_official", "toolace_official_prompt"}:
             if isinstance(content, str):
                 content_text = content
             else:
@@ -943,11 +984,18 @@ class BfclEnv(BaseEnv):
         else:
             shown = names
         hints: list[str] = [base_text]
-        if str(self.params.get("tool_call_parser", "")) == "llama31_official_fc":
+        parser_mode = str(self.params.get("tool_call_parser", ""))
+        if parser_mode == "llama31_official_fc":
             hints.append(
                 "[Hint] In Llama-3.1 mode, emit raw JSON only, e.g. "
                 '{"name": "tool_name", "parameters": {"arg": "value"}}. '
                 "Do not use <tool_call> tags."
+            )
+        elif parser_mode in {"toolace_fc", "toolace_official_prompt"}:
+            hints.append(
+                "[Hint] In ToolACE BFCL prompt mode, output only a Python "
+                "function-call list, e.g. [tool_name(arg=\"value\")]. "
+                "Do not use <tool_call> tags or JSON objects."
             )
         else:
             hints.append(

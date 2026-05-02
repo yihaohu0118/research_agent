@@ -24,8 +24,10 @@ actor_rollout_ref:
 
 env_service:
   bfcl:
-    tool_prompt_mode: toolace_fc
-    tool_call_parser: toolace_fc
+    # watt-tool follows the same BFCL prompt-mode format used by ToolACE.
+    tool_prompt_mode: toolace_official_prompt
+    tool_call_parser: toolace_official_prompt
+    tool_result_mode: toolace_official_prompt
     observation_lite:
       enable: true
       apply_to_validation: false
