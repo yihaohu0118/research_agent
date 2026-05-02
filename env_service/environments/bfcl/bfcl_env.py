@@ -289,7 +289,8 @@ def _loads_toolace_jsonish_payload(content: str) -> Any:
     raw = _strip_json_code_fence(content).strip()
     candidates = [raw]
     if raw.startswith("{") and re.search(r"}\s*[,;]\s*{", raw):
-        candidates.insert(0, f"[{re.sub(r'}\s*;\s*{', '}, {', raw)}]")
+        joined = re.sub(r"}\s*;\s*{", "}, {", raw)
+        candidates.insert(0, f"[{joined}]")
 
     last_error: Exception | None = None
     for candidate in candidates:
