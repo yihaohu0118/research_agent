@@ -13,24 +13,14 @@ trainer:
   experiment_name: bfcl_grpo_apatch_observation_required_toolace2_llama31_8b
 
 data:
-  # ToolACE already has a compact native function-call format. A long response
-  # budget lets late-RL format drift turn into thousands of junk tokens, which
-  # then poisons subsequent updates. Keep generations short and tool-call-like.
-  max_response_length: 1024
+  # ToolACE/BFCL prompt mode exposes JSON function docs in the prompt, so some
+  # validation examples exceed the base 8k prompt cap. Keep optimization
+  # hyperparameters inherited from bfcl_grpo_base and only expand prompt budget.
+  max_prompt_length: 12288
 
 actor_rollout_ref:
   model:
     path: Team-ACE/ToolACE-2-Llama-3.1-8B
-  rollout:
-    temperature: 0.7
-    top_p: 0.95
-    response_length: ${data.max_response_length}
-    multi_turn:
-      max_steps: 12
-  actor:
-    optim:
-      lr: 5e-7
-    kl_loss_coef: 0.01
 
 env_service:
   bfcl:
