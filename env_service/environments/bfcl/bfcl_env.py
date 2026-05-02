@@ -1138,12 +1138,16 @@ class BfclEnv(BaseEnv):
                 next_msg_content = msg.get("content", "")
                 last_batch_is_tool_result = False
 
-        # For ToolACE/watt (toolace_official_prompt), tool execution results
-        # must arrive as the "ipython" role so the model sees the same token
-        # format it was trained on (<|start_header_id|>ipython<|end_header_id|>).
+        # Both Llama-3.1 and ToolACE/watt models expect tool execution results
+        # under the "ipython" role (<|start_header_id|>ipython<|end_header_id|>).
+        # The official gorilla LlamaHandler explicitly uses role="ipython" for
+        # all models that go through LlamaHandler (llama31_official and
+        # toolace_official_prompt).  Using role="user" makes the model treat the
+        # tool result as a new user query, causing severe performance degradation.
+        _IPYTHON_RESULT_MODES = {"llama31_official", "toolace_official_prompt"}
         use_ipython_role = (
             last_batch_is_tool_result
-            and result_mode == "toolace_official_prompt"
+            and result_mode in _IPYTHON_RESULT_MODES
         )
         state_role = Role.IPYTHON if use_ipython_role else Role.USER
         return (
