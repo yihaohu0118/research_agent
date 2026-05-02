@@ -627,8 +627,26 @@ def tools_schema_to_llama31_official_prompt(
 def tools_schema_to_toolace_official_prompt(
     tools_schema: List[Dict[str, Any]],
 ) -> str:
-    """BFCL official prompt-mode interface used for ToolACE/watt Llama models."""
-    function_docs = json.dumps(tools_schema, ensure_ascii=False, indent=4)
+    """BFCL official prompt-mode interface used for ToolACE/watt Llama models.
+
+    ToolACE/watt expects the key "arguments" (not "parameters") in each function
+    definition.  BFCL's internal schema uses "parameters", so we rename it here
+    before serialising to the system-prompt.
+    """
+    converted = []
+    for tool in tools_schema:
+        # Support both bare-function dicts and OpenAI {"type": "function", "function": {...}} wrappers.
+        func = tool.get("function", tool)
+        entry: Dict[str, Any] = {
+            "name": func.get("name", ""),
+            "description": func.get("description", ""),
+        }
+        # Rename "parameters" → "arguments" as expected by ToolACE/watt models.
+        params = func.get("parameters") or func.get("arguments")
+        if params is not None:
+            entry["arguments"] = params
+        converted.append(entry)
+    function_docs = json.dumps(converted, ensure_ascii=False, indent=4)
     return (
         "You are an expert in composing functions. You are given a question and a "
         "set of possible functions. Based on the question, you will need to make "
