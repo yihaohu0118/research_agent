@@ -1,4 +1,4 @@
-# A-Patch + train-only observation annotations, with nreHieW/Llama-3.1-8B-Instruct.
+# A-Patch + train-only observation annotations, with official meta-llama/Llama-3.1-8B-Instruct.
 
 hydra:
   searchpath:
@@ -10,7 +10,7 @@ defaults:
   - _self_
 
 trainer:
-  experiment_name: bfcl_grpo_apatch_observation_required_nrehiew_llama31_8b
+  experiment_name: bfcl_grpo_apatch_observation_required_meta_llama31_8b
 
 data:
   # Llama-3.1 official tool calling places pretty-printed JSON function docs
@@ -21,7 +21,7 @@ data:
 
 actor_rollout_ref:
   model:
-    path: nreHieW/Llama-3.1-8B-Instruct
+    path: meta-llama/Llama-3.1-8B-Instruct
   rollout:
     response_length: ${data.max_response_length}
     max_model_len: 12288
@@ -42,11 +42,11 @@ env_service:
       hide_optional: false
 
 tocf:
-  persistence_dir: experiments/bfcl_grpo_module_ablation/apatch_observation_required_nrehiew_llama31_8b/tocf_state
+  persistence_dir: experiments/bfcl_grpo_module_ablation/apatch_observation_required_meta_llama31_8b/tocf_state
   state:
-    dir: experiments/bfcl_grpo_module_ablation/apatch_observation_required_nrehiew_llama31_8b/tocf_state
+    dir: experiments/bfcl_grpo_module_ablation/apatch_observation_required_meta_llama31_8b/tocf_state
   stats:
-    dump_dir: experiments/bfcl_grpo_module_ablation/apatch_observation_required_nrehiew_llama31_8b/tocf_stats
+    dump_dir: experiments/bfcl_grpo_module_ablation/apatch_observation_required_meta_llama31_8b/tocf_stats
   advantage:
     apatch:
       enable: true
