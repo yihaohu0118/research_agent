@@ -51,6 +51,119 @@ Examples:
 At each turn, you should try your best to complete the tasks requested by the user within the current turn. Continue to output functions to call until you have fulfilled the user's request to the best of your ability. Once you have no more functions to call, the system will consider the current turn complete and proceed to the next turn or task."""
 
 
+LLAMA31_OFFICIAL_SYSTEM_PROMPT = """Environment: ipython
+Cutting Knowledge Date: December 2023
+Today Date: 26 Jul 2024"""
+
+
+def _strip_json_code_fence(content: str) -> str:
+    text = content.strip()
+    if not text.startswith("```"):
+        return text
+    lines = text.splitlines()
+    if lines and lines[0].strip().startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def _loads_json_or_literal(fragment: str) -> Any:
+    try:
+        return json.loads(fragment)
+    except json.JSONDecodeError:
+        return ast.literal_eval(fragment)
+
+
+def _parse_llama31_payload(content: str) -> Any:
+    text = _strip_json_code_fence(content.replace("<|python_tag|>", "")).strip()
+    if not text:
+        raise ValueError("empty response")
+    try:
+        return _loads_json_or_literal(text)
+    except Exception:
+        pass
+
+    if ";" in text:
+        values = []
+        for part in text.split(";"):
+            part = part.strip().rstrip(",")
+            if part:
+                values.append(_loads_json_or_literal(part))
+        if values:
+            return values
+
+    raise ValueError("expected raw JSON function call")
+
+
+def parse_llama31_official_content_to_tool_calls(
+    content: str, strict: bool = False
+) -> Dict[str, Any]:
+    stripped = content.strip()
+    if not stripped:
+        return {"role": "assistant", "content": "", "tool_calls": []}
+
+    has_tool_tag = "<tool_call" in stripped or "</tool_call>" in stripped
+    looks_structured = stripped.startswith("{") or stripped.startswith("[") or stripped.startswith("```")
+    if has_tool_tag:
+        result = {"role": "assistant", "content": stripped, "tool_calls": []}
+        if strict:
+            result["_bfcl_parse_error"] = (
+                "Llama-3.1 official mode expects raw JSON, not <tool_call> XML tags."
+            )
+        return result
+
+    try:
+        payload = _parse_llama31_payload(stripped)
+    except Exception as exc:
+        result = {"role": "assistant", "content": stripped, "tool_calls": []}
+        if strict and looks_structured:
+            result["_bfcl_parse_error"] = f"Invalid Llama-3.1 JSON function call: {exc}"
+        return result
+
+    entries = payload if isinstance(payload, list) else [payload]
+    tool_calls: list[dict[str, Any]] = []
+    parse_errors: list[str] = []
+    call_id_counter = 1
+    for entry in entries:
+        if not isinstance(entry, dict):
+            parse_errors.append("Function call entry must be a JSON object.")
+            continue
+        func_name = entry.get("name") or entry.get("function")
+        arguments = entry.get("parameters", entry.get("arguments"))
+        if not func_name:
+            parse_errors.append("Function call JSON must contain a 'name' key.")
+            continue
+        if arguments is None:
+            parse_errors.append("Function call JSON must contain a 'parameters' object.")
+            continue
+        if isinstance(arguments, str):
+            try:
+                arguments = _loads_json_or_literal(arguments)
+            except Exception:
+                parse_errors.append(f"Tool '{func_name}' has non-JSON string parameters.")
+                continue
+        if strict and not isinstance(arguments, dict):
+            parse_errors.append(f"Tool '{func_name}' parameters must be a JSON object.")
+            continue
+        tool_calls.append(
+            {
+                "id": f"{func_name}_{call_id_counter}",
+                "type": "function",
+                "function": {
+                    "name": str(func_name),
+                    "arguments": arguments,
+                },
+            }
+        )
+        call_id_counter += 1
+
+    result = {"role": "assistant", "content": "", "tool_calls": tool_calls}
+    if strict and parse_errors:
+        result["_bfcl_parse_error"] = "; ".join(parse_errors)
+    return result
+
+
 def parse_assistant_content_to_tool_calls(
     msg: Dict[str, Any], strict: bool = False, parser_mode: str = "xml_json"
 ) -> Dict[str, Any]:
@@ -67,6 +180,9 @@ def parse_assistant_content_to_tool_calls(
     content = msg.get("content", "") or ""
     if not isinstance(content, str):
         content = str(content)
+
+    if parser_mode == "llama31_official_fc":
+        return parse_llama31_official_content_to_tool_calls(content, strict=strict)
 
     tool_calls = []
     remaining_content = content
@@ -277,6 +393,33 @@ def parse_toolace_content_to_tool_calls(
         result["_bfcl_parse_error"] = "; ".join(parse_errors)
     return result
 
+
+def tools_schema_to_llama31_official_prompt(
+    tools_schema: List[Dict[str, Any]],
+    user_query: str,
+    extra_instructions: List[str] | None = None,
+) -> str:
+    lines = [
+        "Given the following functions, please respond with a JSON for a function call "
+        "with its proper arguments that best answers the given prompt.",
+        "",
+        'Respond in the format {"name": function name, "parameters": dictionary of argument name and its value}.',
+        "Do not use variables.",
+        "Return only raw JSON for function calls; do not wrap the JSON in <tool_call> tags.",
+        "If no function can be used, or required parameters are missing, answer briefly in plain text.",
+        "",
+    ]
+    for tool in tools_schema:
+        lines.append(json.dumps(tool, ensure_ascii=False, indent=4))
+        lines.append("")
+    extras = [str(item).strip() for item in (extra_instructions or []) if str(item).strip()]
+    if extras:
+        lines.extend(extras)
+        lines.append("")
+    lines.append(user_query.strip())
+    return "\n".join(lines).strip()
+
+
 def tools_schema_to_qwen_prompt(tools_schema, prompt_mode: str = "bfcl_qwen_fc"):
     """
     将 tools_schema 转换为符合 Qwen 模型 chat_template 的工具描述 prompt。
@@ -305,10 +448,6 @@ def tools_schema_to_qwen_prompt(tools_schema, prompt_mode: str = "bfcl_qwen_fc")
     if prompt_mode == "bfcl_qwen_fc":
         lines.append("# Tools\n")
         lines.append("You may call one or more functions to assist with the user query.\n")
-        lines.append("You are provided with function signatures within <tools></tools> XML tags:")
-    elif prompt_mode == "bfcl_llama_single_fc":
-        lines.append("# Tools\n")
-        lines.append("You may call functions to assist with the user query.\n")
         lines.append("You are provided with function signatures within <tools></tools> XML tags:")
     elif prompt_mode == "toolace_fc":
         lines.append("You are an expert in composing functions. You are given a question and a set of possible functions. Based on the question, you will need to make one or more function/tool calls to achieve the purpose.")
@@ -355,25 +494,6 @@ def tools_schema_to_qwen_prompt(tools_schema, prompt_mode: str = "bfcl_qwen_fc")
         lines.append("<tool_call>")
         lines.append('{"name": <function-name>, "arguments": <args-json-object>}')
         lines.append("</tool_call>")
-    elif prompt_mode == "bfcl_llama_single_fc":
-        lines.append("Strict response rules:")
-        lines.append("- Return at most ONE tool call in each assistant message.")
-        lines.append("- If a tool call is needed, output ONLY the <tool_call> block and stop immediately.")
-        lines.append("- Do not explain before or after a tool call.")
-        lines.append("- Do not repeat the same tool call in a single message.")
-        lines.append("- Do not invent placeholder values; use exact values from the user query or previous tool responses.")
-        lines.append("- Do not write XML-style arguments inside <tool_call>; the content must be one JSON object.")
-        lines.append("- If no available tool can satisfy the user request, answer briefly in plain text without a tool call.")
-        # IMPORTANT: do NOT use angle-bracket placeholders here. Weaker base models
-        # (e.g. Llama-3.1-8B) tend to literally copy the placeholder syntax and emit
-        # XML-tag tool calls like <tool_call><find><name>config.py</name></find></tool_call>,
-        # which the strict parser rejects. Show a concrete JSON example instead.
-        lines.append("For each function call, return a JSON object with the function name and arguments inside <tool_call></tool_call> XML tags. The JSON object MUST have exactly two keys: \"name\" (string) and \"arguments\" (object).")
-        lines.append("Example tool call:")
-        lines.append("<tool_call>")
-        lines.append('{"name": "get_weather", "arguments": {"city": "Paris", "unit": "celsius"}}')
-        lines.append("</tool_call>")
-        lines.append("Invalid format example: <tool_call><get_weather><city>Paris</city></get_weather></tool_call>")
     elif prompt_mode == "toolace_fc":
         lines.append("Remember: output only a bracketed function-call list, e.g. [search(query=\"value\")].")
     elif prompt_mode != "t3rl_text":
@@ -423,6 +543,13 @@ def tool_message_to_qwen_text(tool_messages, result_mode: str = "bfcl_tool_respo
             else:
                 content_text = json.dumps(content, ensure_ascii=False)
             tool_entries.append(f"<tool_response>\n{content_text}\n</tool_response>")
+            continue
+        if result_mode == "llama31_official":
+            if isinstance(content, str):
+                content_text = content
+            else:
+                content_text = json.dumps(content, ensure_ascii=False)
+            tool_entries.append(content_text)
             continue
 
         # 确保 content 是 JSON 可序列化对象
@@ -530,20 +657,33 @@ class BfclEnv(BaseEnv):
         # test_category = self.test_entry["id"].rsplit("_", 1)[0]
         # function_docs = func_doc_language_specific_pre_processing(functions, test_category)
         # system_prompt = system_prompt_template.format(functions=function_docs)
-        tool_prompt = tools_schema_to_qwen_prompt(
-            presented_tools,
-            prompt_mode=self.params.get("tool_prompt_mode", "bfcl_qwen_fc"),
-        )
+        prompt_mode = str(self.params.get("tool_prompt_mode", "bfcl_qwen_fc"))
+        extra_instructions: list[str] = []
         if self._observation_lite_enabled():
-            tool_prompt = f"{tool_prompt}\n\n{self._observation_lite_instruction()}"
+            extra_instructions.append(self._observation_lite_instruction())
         diag_block = self._diagnostic_evolution_system_block()
         if diag_block:
-            tool_prompt = f"{tool_prompt}\n\n{diag_block}"
+            extra_instructions.append(diag_block)
+        if prompt_mode == "llama31_official_fc":
+            system_content = LLAMA31_OFFICIAL_SYSTEM_PROMPT
+            user_content = tools_schema_to_llama31_official_prompt(
+                presented_tools,
+                first_query,
+                extra_instructions=extra_instructions,
+            )
+        else:
+            system_content = tools_schema_to_qwen_prompt(
+                presented_tools,
+                prompt_mode=prompt_mode,
+            )
+            if extra_instructions:
+                system_content = f"{system_content}\n\n" + "\n\n".join(extra_instructions)
+            user_content = first_query
         return {
             # system_prompt + "\n\n" + first_query
             "state": [
-                {"role": "system", "content": tool_prompt},
-                {"role": "user", "content": first_query}
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": user_content}
                 ],
             "info": {
                 "instance_id": self.instance_id,
@@ -803,11 +943,18 @@ class BfclEnv(BaseEnv):
         else:
             shown = names
         hints: list[str] = [base_text]
-        hints.append(
-            "[Hint] Each tool call MUST be a JSON object inside <tool_call>...</tool_call> "
-            'tags with both "name" and "arguments" keys, e.g. '
-            '<tool_call>{"name": "<tool>", "arguments": {"<arg>": <value>}}</tool_call>.'
-        )
+        if str(self.params.get("tool_call_parser", "")) == "llama31_official_fc":
+            hints.append(
+                "[Hint] In Llama-3.1 mode, emit raw JSON only, e.g. "
+                '{"name": "tool_name", "parameters": {"arg": "value"}}. '
+                "Do not use <tool_call> tags."
+            )
+        else:
+            hints.append(
+                "[Hint] Each tool call MUST be a JSON object inside <tool_call>...</tool_call> "
+                'tags with both "name" and "arguments" keys, e.g. '
+                '<tool_call>{"name": "<tool>", "arguments": {"<arg>": <value>}}</tool_call>.'
+            )
         if shown:
             hints.append(
                 "[Hint] Available tools: " + ", ".join(shown) + "."

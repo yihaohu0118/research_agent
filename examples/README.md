@@ -18,7 +18,7 @@ reweighting module, and the working observation-interface module.
 | `bfcl_grpo_apatch_observation_required_rerun.yaml` | Reproducibility rerun for the observation-interface setting. |
 | `bfcl_grpo_apatch_observation_required_nolc.yaml` | Observation-interface setting applied only outside long-context tasks. |
 | `bfcl_grpo_apatch_static_fission.yaml` | A-Patch + train-only static recovery continuations after parse/tool errors. |
-| `bfcl_grpo_apatch_observation_required_llama31_8b.yaml` | Observation-interface setting with `nreHieW/Llama-3.1-8B-Instruct`; uses Llama single-call prompt and shorter rollout budget. |
+| `bfcl_grpo_apatch_observation_required_llama31_8b.yaml` | Observation-interface setting with `nreHieW/Llama-3.1-8B-Instruct`; uses the official Llama-3.1 raw-JSON function-call protocol. |
 | `bfcl_grpo_apatch_observation_required_toolace2_llama31_8b.yaml` | Observation-interface setting with `Team-ACE/ToolACE-2-Llama-3.1-8B`; uses ToolACE native function-call format and normal rollout budget. |
 | `bfcl_grpo_apatch_observation_required_watt_tool_8b.yaml` | Observation-interface setting with `watt-ai/watt-tool-8B`; uses ToolACE-style native function-call format and normal rollout budget. |
 

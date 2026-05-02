@@ -26,7 +26,9 @@ actor_rollout_ref:
 
 env_service:
   bfcl:
-    tool_prompt_mode: bfcl_llama_single_fc
+    tool_prompt_mode: llama31_official_fc
+    tool_call_parser: llama31_official_fc
+    tool_result_mode: llama31_official
     observation_lite:
       enable: true
       apply_to_validation: false
