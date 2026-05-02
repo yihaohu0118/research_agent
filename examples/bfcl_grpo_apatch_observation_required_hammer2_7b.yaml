@@ -1,0 +1,43 @@
+# A-Patch + train-only observation annotations, with MadeAgents/Hammer2.1-7b.
+# Hammer2.1 is based on Qwen2.5-7B-Instruct and uses <tool_call> JSON format,
+# which is compatible with the default bfcl_qwen_fc prompt/result modes.
+
+hydra:
+  searchpath:
+    - file://external/config_fallback
+    - file://config
+
+defaults:
+  - bfcl_tocf_taes_shared
+  - _self_
+
+trainer:
+  experiment_name: bfcl_grpo_apatch_observation_required_hammer2_7b
+
+actor_rollout_ref:
+  model:
+    path: MadeAgents/Hammer2.1-7b
+
+env_service:
+  bfcl:
+    # Hammer2.1 uses Qwen-style <tool_call>{json}</tool_call> format.
+    tool_prompt_mode: bfcl_qwen_fc
+    tool_call_parser: bfcl_qwen_fc
+    tool_result_mode: bfcl_tool_response
+    observation_lite:
+      enable: true
+      apply_to_validation: false
+      add_required_hint: true
+      add_type_hint: false
+      add_enum_hint: true
+      hide_optional: false
+
+tocf:
+  persistence_dir: experiments/bfcl_grpo_module_ablation/apatch_observation_required_hammer2_7b/tocf_state
+  state:
+    dir: experiments/bfcl_grpo_module_ablation/apatch_observation_required_hammer2_7b/tocf_state
+  stats:
+    dump_dir: experiments/bfcl_grpo_module_ablation/apatch_observation_required_hammer2_7b/tocf_stats
+  advantage:
+    apatch:
+      enable: true
