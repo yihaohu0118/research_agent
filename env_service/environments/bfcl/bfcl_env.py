@@ -362,6 +362,7 @@ def tools_schema_to_qwen_prompt(tools_schema, prompt_mode: str = "bfcl_qwen_fc")
         lines.append("- Do not explain before or after a tool call.")
         lines.append("- Do not repeat the same tool call in a single message.")
         lines.append("- Do not invent placeholder values; use exact values from the user query or previous tool responses.")
+        lines.append("- Do not write XML-style arguments inside <tool_call>; the content must be one JSON object.")
         lines.append("- If no available tool can satisfy the user request, answer briefly in plain text without a tool call.")
         # IMPORTANT: do NOT use angle-bracket placeholders here. Weaker base models
         # (e.g. Llama-3.1-8B) tend to literally copy the placeholder syntax and emit
@@ -372,6 +373,7 @@ def tools_schema_to_qwen_prompt(tools_schema, prompt_mode: str = "bfcl_qwen_fc")
         lines.append("<tool_call>")
         lines.append('{"name": "get_weather", "arguments": {"city": "Paris", "unit": "celsius"}}')
         lines.append("</tool_call>")
+        lines.append("Invalid format example: <tool_call><get_weather><city>Paris</city></get_weather></tool_call>")
     elif prompt_mode == "toolace_fc":
         lines.append("Remember: output only a bracketed function-call list, e.g. [search(query=\"value\")].")
     elif prompt_mode != "t3rl_text":
