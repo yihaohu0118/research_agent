@@ -1,6 +1,4 @@
 # A-Patch + train-only observation annotations, with MadeAgents/Hammer2.1-7b.
-# Hammer2.1 is based on Qwen2.5-7B-Instruct and uses <tool_call> JSON format,
-# which is compatible with the default bfcl_qwen_fc prompt/result modes.
 
 hydra:
   searchpath:
@@ -20,10 +18,6 @@ actor_rollout_ref:
 
 env_service:
   bfcl:
-    # Hammer2.1 uses Qwen-style <tool_call>{json}</tool_call> format.
-    tool_prompt_mode: bfcl_qwen_fc
-    tool_call_parser: bfcl_qwen_fc
-    tool_result_mode: bfcl_tool_response
     observation_lite:
       enable: true
       apply_to_validation: false
