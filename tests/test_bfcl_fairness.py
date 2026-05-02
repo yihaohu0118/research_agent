@@ -251,6 +251,50 @@ def test_toolace_official_prompt_uses_bfcl_python_protocol():
     assert "<tool_response>" not in tool_text
 
 
+def test_toolace_official_parser_accepts_json_style_fallback():
+    if not _require_bfcl_helpers():
+        return
+
+    parsed = parse_assistant_content_to_tool_calls(
+        {
+            "role": "assistant",
+            "content": '{"name": "get_stock_info", "parameters": {"symbol": "NVDA"}}',
+        },
+        strict=True,
+        parser_mode="toolace_official_prompt",
+    )
+    parsed_unquoted_name = parse_assistant_content_to_tool_calls(
+        {
+            "role": "assistant",
+            "content": '{"name": get_watchlist, "parameters": {}}',
+        },
+        strict=True,
+        parser_mode="toolace_official_prompt",
+    )
+    parsed_json_list = parse_assistant_content_to_tool_calls(
+        {
+            "role": "assistant",
+            "content": (
+                '[{"name": "ls", "parameters": {"a": true}}, '
+                '{"name": "cat", "arguments": {"file_name": "report.txt"}}]'
+            ),
+        },
+        strict=True,
+        parser_mode="toolace_official_prompt",
+    )
+
+    assert parsed["content"] == ""
+    assert parsed["tool_calls"] == [_tool_call("get_stock_info", {"symbol": "NVDA"})]
+    assert parsed_unquoted_name["tool_calls"] == [_tool_call("get_watchlist", {})]
+    assert parsed_json_list["tool_calls"] == [
+        _tool_call("ls", {"a": True}),
+        {
+            **_tool_call("cat", {"file_name": "report.txt"}),
+            "id": "cat_2",
+        },
+    ]
+
+
 def test_clean_trajectory_flags_tool_errors():
     if not _require_bfcl_eval():
         return
@@ -277,4 +321,5 @@ if __name__ == "__main__":
     test_llama31_official_parser_accepts_raw_parameters_json()
     test_llama31_official_prompt_uses_raw_json_protocol()
     test_toolace_official_prompt_uses_bfcl_python_protocol()
+    test_toolace_official_parser_accepts_json_style_fallback()
     test_clean_trajectory_flags_tool_errors()

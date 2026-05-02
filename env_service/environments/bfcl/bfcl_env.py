@@ -285,6 +285,94 @@ def _toolace_literal(node: ast.AST) -> Any:
             return None
 
 
+def _loads_toolace_jsonish_payload(content: str) -> Any:
+    raw = _strip_json_code_fence(content).strip()
+    candidates = [raw]
+    if raw.startswith("{") and re.search(r"}\s*[,;]\s*{", raw):
+        candidates.insert(0, f"[{re.sub(r'}\s*;\s*{', '}, {', raw)}]")
+
+    last_error: Exception | None = None
+    for candidate in candidates:
+        text = re.sub(
+            r'((?:"name"|"function")\s*:\s*)([A-Za-z_][\w.]*)',
+            lambda m: f'{m.group(1)}"{m.group(2)}"',
+            candidate,
+        )
+        try:
+            return _loads_json_or_literal(text)
+        except Exception as exc:
+            last_error = exc
+        try:
+            pythonish = re.sub(r"\btrue\b", "True", text)
+            pythonish = re.sub(r"\bfalse\b", "False", pythonish)
+            pythonish = re.sub(r"\bnull\b", "None", pythonish)
+            return ast.literal_eval(pythonish)
+        except Exception as exc:
+            last_error = exc
+
+    if last_error is not None:
+        raise last_error
+    raise ValueError("empty ToolACE JSON-style payload")
+
+
+def _parse_toolace_jsonish_to_tool_calls(
+    content: str, strict: bool = False
+) -> Dict[str, Any] | None:
+    stripped = content.strip()
+    looks_jsonish = stripped.startswith("{") or stripped.startswith("[") or stripped.startswith("```")
+    if not looks_jsonish:
+        return None
+
+    try:
+        payload = _loads_toolace_jsonish_payload(stripped)
+    except Exception as exc:
+        result = {"role": "assistant", "content": content.strip(), "tool_calls": []}
+        if strict:
+            result["_bfcl_parse_error"] = f"Invalid ToolACE JSON-style function call: {exc}"
+        return result
+
+    entries = payload if isinstance(payload, list) else [payload]
+    tool_calls: list[dict[str, Any]] = []
+    parse_errors: list[str] = []
+    call_id_counter = 1
+    for entry in entries:
+        if not isinstance(entry, dict):
+            parse_errors.append("ToolACE JSON-style call entry must be an object.")
+            continue
+        func_name = entry.get("name") or entry.get("function")
+        if not isinstance(func_name, str) or not func_name.strip():
+            parse_errors.append("ToolACE JSON-style call must contain a string 'name'.")
+            continue
+        arguments = entry.get("parameters", entry.get("arguments", {}))
+        if arguments is None:
+            arguments = {}
+        if isinstance(arguments, str):
+            try:
+                arguments = _loads_json_or_literal(arguments)
+            except Exception:
+                parse_errors.append(f"Tool '{func_name}' has non-JSON string parameters.")
+                arguments = {}
+        if not isinstance(arguments, dict):
+            parse_errors.append(f"Tool '{func_name}' parameters must be an object.")
+            arguments = {}
+        tool_calls.append(
+            {
+                "id": f"{func_name}_{call_id_counter}",
+                "type": "function",
+                "function": {
+                    "name": func_name.strip(),
+                    "arguments": arguments,
+                },
+            }
+        )
+        call_id_counter += 1
+
+    result = {"role": "assistant", "content": "", "tool_calls": tool_calls}
+    if strict and parse_errors:
+        result["_bfcl_parse_error"] = "; ".join(parse_errors)
+    return result
+
+
 def _toolace_bracket_spans(content: str) -> list[tuple[int, int, str]]:
     spans: list[tuple[int, int, str]] = []
     depth = 0
@@ -337,6 +425,9 @@ def parse_toolace_content_to_tool_calls(
         ):
             spans = [(0, len(content), stripped)]
         else:
+            jsonish_result = _parse_toolace_jsonish_to_tool_calls(content, strict=strict)
+            if jsonish_result is not None:
+                return jsonish_result
             if stripped.startswith("[") or stripped.endswith("]"):
                 return {
                     "role": "assistant",
