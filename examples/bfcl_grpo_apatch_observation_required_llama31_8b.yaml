@@ -17,6 +17,7 @@ data:
   # in the first user message. BFCL validation can exceed the Qwen-oriented
   # 8k prompt cap, so keep a larger prompt budget while restoring the normal
   # BFCL response budget under max_model_len=16384.
+  train_batch_size: 16
   max_prompt_length: 11264
   max_response_length: 4096
 
