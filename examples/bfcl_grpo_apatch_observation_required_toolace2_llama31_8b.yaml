@@ -24,11 +24,11 @@ actor_rollout_ref:
 
 env_service:
   bfcl:
-    # ToolACE follows BFCL's official Llama prompt-mode protocol:
-    # prompt with JSON function docs, generate [func(arg=value)] calls.
-    tool_prompt_mode: toolace_official_prompt
-    tool_call_parser: toolace_official_prompt
-    tool_result_mode: toolace_official_prompt
+    # Probe ToolACE under Llama-3.1 official JSON function-calling format:
+    # prompt with JSON function docs, generate raw {"name": ..., "parameters": ...}.
+    tool_prompt_mode: llama31_official_fc
+    tool_call_parser: llama31_official_fc
+    tool_result_mode: llama31_official
     observation_lite:
       enable: true
       apply_to_validation: false
