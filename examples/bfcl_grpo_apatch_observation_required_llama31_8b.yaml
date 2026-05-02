@@ -13,6 +13,10 @@ trainer:
   experiment_name: bfcl_grpo_apatch_observation_required_nrehiew_llama31_8b
 
 data:
+  # Llama-3.1 official tool calling places pretty-printed JSON function docs
+  # in the first user message. BFCL validation can exceed the Qwen-oriented
+  # 8k prompt cap, so use the full prompt budget under max_model_len=12288.
+  max_prompt_length: 11264
   max_response_length: 1024
 
 actor_rollout_ref:
