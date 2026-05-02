@@ -375,7 +375,7 @@ class Linear_CMT(Trajectory, ContextManagerBase):
             env_output['content'] += " /no_think"
         ext_msg = ExtendedMessage(
             author="env",
-            role="user",
+            role=env_output.get("role", "user"),
             content=env_output['content'],
             clip=True,
             clip_token_limit=self.max_env_output_length,

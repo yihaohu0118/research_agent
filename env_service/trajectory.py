@@ -17,6 +17,7 @@ class Role(str, Enum):
     SYSTEM = "system"
     USER = "user"
     TOOL = "tool"  # environment
+    IPYTHON = "ipython"  # tool-execution result (Llama-3.1 / ToolACE convention)
 
     ASSISTANT = "assistant"  # policy model
     CONTEXT_ASSISTANT = "context_assistant"  # context model

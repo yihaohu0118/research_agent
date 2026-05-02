@@ -26,7 +26,7 @@ import uuid
 
 from env_service.base import BaseEnv
 from env_service.registry import Registry
-from env_service.trajectory import StateMessage, ActionMessage, ToolCall
+from env_service.trajectory import StateMessage, ActionMessage, ToolCall, Role
 
 
 # 默认路径，可用环境变量覆盖
@@ -1099,6 +1099,12 @@ class BfclEnv(BaseEnv):
         """Append EnvHandler response to history and build the next state."""
         new_tool_calls: list[ToolCall] = []
         next_msg_content = ""
+        # Track whether the last batch of messages was a tool-execution result.
+        # When True and result_mode is toolace_official_prompt, we use "ipython"
+        # role so that ToolACE/Llama-3.1 models see the correct token header.
+        last_batch_is_tool_result = False
+
+        result_mode = str(self.params.get("tool_result_mode", "bfcl_tool_response"))
 
         # FIXME: yunpeng - messages 可能是多个吗
         for idx, msg in enumerate(env_resp.get("messages", [])):
@@ -1107,7 +1113,7 @@ class BfclEnv(BaseEnv):
                 # FIXME 改成一次性传入所有tool messages
                 rendered = tool_message_to_qwen_text(
                     msg,
-                    result_mode=self.params.get("tool_result_mode", "bfcl_tool_response"),
+                    result_mode=result_mode,
                 )
                 error_text = self._extract_tool_error_text(msg.get("content"))
                 if error_text:
@@ -1119,18 +1125,29 @@ class BfclEnv(BaseEnv):
                     }
                 rendered = self._enrich_tool_response_text(rendered, msg)
                 next_msg_content += rendered
+                last_batch_is_tool_result = True
             elif msg["role"] == "user":
                 next_msg_content = msg.get("content", "")
                 # FIXME: yunpeng 更新新的tool schema到user msg里
                 self.current_turn += 1
+                last_batch_is_tool_result = False
             elif msg["role"] == "env":
                 # two situations:
                 # 1. [{"role": "env", "content": "[CONVERSATION_COMPLETED]"}]
                 # 2. [{"role": "env", "content": f"[ERROR] {error_message}"}]
                 next_msg_content = msg.get("content", "")
+                last_batch_is_tool_result = False
 
+        # For ToolACE/watt (toolace_official_prompt), tool execution results
+        # must arrive as the "ipython" role so the model sees the same token
+        # format it was trained on (<|start_header_id|>ipython<|end_header_id|>).
+        use_ipython_role = (
+            last_batch_is_tool_result
+            and result_mode == "toolace_official_prompt"
+        )
+        state_role = Role.IPYTHON if use_ipython_role else Role.USER
         return (
-            StateMessage(role="user",content=next_msg_content)
+            StateMessage(role=state_role, content=next_msg_content)
              ###### changed by czy0718, without tool_role, trajectory.steps cannot be converted by tool_execution_results
         )
 
