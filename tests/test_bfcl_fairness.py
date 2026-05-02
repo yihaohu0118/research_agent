@@ -7,6 +7,7 @@ try:
     from env_service.environments.bfcl.bfcl_env import (
         parse_assistant_content_to_tool_calls,
         tool_message_to_qwen_text,
+        tools_schema_to_envtuning_prompt,
         tools_schema_to_llama31_official_prompt,
         tools_schema_to_toolace_official_prompt,
         tools_schema_to_qwen_prompt,
@@ -17,6 +18,7 @@ except ModuleNotFoundError as exc:
     parse_assistant_content_to_tool_calls = None
     tool_message_to_qwen_text = None
     tools_schema_to_qwen_prompt = None
+    tools_schema_to_envtuning_prompt = None
     tools_schema_to_llama31_official_prompt = None
     tools_schema_to_toolace_official_prompt = None
 
@@ -37,6 +39,7 @@ def _require_bfcl_helpers() -> bool:
         parse_assistant_content_to_tool_calls is not None
         and tool_message_to_qwen_text is not None
         and tools_schema_to_qwen_prompt is not None
+        and tools_schema_to_envtuning_prompt is not None
         and tools_schema_to_llama31_official_prompt is not None
         and tools_schema_to_toolace_official_prompt is not None
     )
@@ -295,6 +298,50 @@ def test_toolace_official_parser_accepts_json_style_fallback():
     ]
 
 
+def test_envtuning_fc_protocol_uses_xml_json_schema():
+    if not _require_bfcl_helpers():
+        return
+
+    parsed = parse_assistant_content_to_tool_calls(
+        {
+            "role": "assistant",
+            "content": (
+                "<think>Need the search tool.</think>"
+                '<tool_call>{"name": "search", "arguments": {"query": "value"}}</tool_call>'
+            ),
+        },
+        strict=True,
+        parser_mode="envtuning_fc",
+    )
+    answered = parse_assistant_content_to_tool_calls(
+        {
+            "role": "assistant",
+            "content": "<think>No callable tool.</think><answer>Missing parameter.</answer>",
+        },
+        strict=True,
+        parser_mode="envtuning_fc",
+    )
+    prompt = tools_schema_to_envtuning_prompt(
+        [
+            {
+                "name": "search",
+                "description": "Search tool.",
+                "parameters": {"type": "object", "required": ["query"]},
+            }
+        ]
+    )
+    tool_text = tool_message_to_qwen_text(
+        {"role": "tool", "content": [{"ok": True}], "tool_call_id": "search_1"},
+        result_mode="envtuning_fc",
+    )
+
+    assert parsed["tool_calls"] == [_tool_call("search", {"query": "value"})]
+    assert answered["content"] == "Missing parameter."
+    assert "<think></think>" in prompt
+    assert '"arguments"' in prompt
+    assert "Execution results:" in tool_text
+
+
 def test_clean_trajectory_flags_tool_errors():
     if not _require_bfcl_eval():
         return
@@ -322,4 +369,5 @@ if __name__ == "__main__":
     test_llama31_official_prompt_uses_raw_json_protocol()
     test_toolace_official_prompt_uses_bfcl_python_protocol()
     test_toolace_official_parser_accepts_json_style_fallback()
+    test_envtuning_fc_protocol_uses_xml_json_schema()
     test_clean_trajectory_flags_tool_errors()

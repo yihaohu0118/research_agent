@@ -185,6 +185,8 @@ def parse_assistant_content_to_tool_calls(
         return parse_llama31_official_content_to_tool_calls(content, strict=strict)
     if parser_mode in {"toolace_fc", "toolace_official_prompt"}:
         return parse_toolace_content_to_tool_calls(content, strict=strict)
+    if parser_mode == "envtuning_fc":
+        return parse_envtuning_content_to_tool_calls(content, strict=strict)
 
     tool_calls = []
     remaining_content = content
@@ -263,6 +265,104 @@ def parse_assistant_content_to_tool_calls(
     if strict and parse_errors:
         result["_bfcl_parse_error"] = "; ".join(parse_errors)
 
+    return result
+
+
+def _extract_single_xml_block(content: str, tag: str) -> tuple[str | None, list[str]]:
+    pattern = rf"<{tag}>([\s\S]*?)</{tag}>"
+    matches = re.findall(pattern, content, flags=re.DOTALL)
+    if not matches:
+        return None, []
+    return matches[0].strip(), matches
+
+
+def parse_envtuning_content_to_tool_calls(
+    content: str, strict: bool = False
+) -> Dict[str, Any]:
+    """Parse EnvTuning-style BFCL responses.
+
+    EnvTuning's multi-turn FC interaction asks the model to emit exactly one
+    thinking block and then either a JSON tool payload inside <tool_call> tags
+    or a final answer inside <answer> tags. This mode is kept separate from the
+    BFCL ToolACE prompt-mode parser because it is an interaction protocol, not
+    the official prompt-mode string parser.
+    """
+    raw = content.strip()
+    think_body, think_matches = _extract_single_xml_block(raw, "think")
+    tool_body, tool_matches = _extract_single_xml_block(raw, "tool_call")
+    answer_body, answer_matches = _extract_single_xml_block(raw, "answer")
+
+    parse_errors: list[str] = []
+    if strict:
+        if not think_matches:
+            parse_errors.append("Missing <think></think> block.")
+        if len(think_matches) > 1:
+            parse_errors.append("Multiple <think></think> blocks found.")
+        if len(tool_matches) > 1:
+            parse_errors.append("Multiple <tool_call></tool_call> blocks found.")
+        if len(answer_matches) > 1:
+            parse_errors.append("Multiple <answer></answer> blocks found.")
+        if tool_matches and answer_matches:
+            parse_errors.append("Use either <tool_call> or <answer>, not both.")
+
+    if tool_body is None:
+        if answer_body is not None:
+            result = {"role": "assistant", "content": answer_body, "tool_calls": []}
+        else:
+            result = {"role": "assistant", "content": raw, "tool_calls": []}
+            if strict and ("<tool_call" in raw or "</tool_call>" in raw):
+                parse_errors.append("Malformed <tool_call> block.")
+        if strict and parse_errors:
+            result["_bfcl_parse_error"] = "; ".join(parse_errors)
+        return result
+
+    try:
+        payload = _loads_json_or_literal(_strip_json_code_fence(tool_body))
+    except Exception as exc:
+        result = {"role": "assistant", "content": raw, "tool_calls": []}
+        if strict:
+            parse_errors.append(f"Invalid JSON inside <tool_call>: {exc}")
+            result["_bfcl_parse_error"] = "; ".join(parse_errors)
+        return result
+
+    entries = payload if isinstance(payload, list) else [payload]
+    tool_calls: list[dict[str, Any]] = []
+    call_id_counter = 1
+    for entry in entries:
+        if not isinstance(entry, dict):
+            parse_errors.append("Tool call entry must be a JSON object.")
+            continue
+        func_name = entry.get("name") or entry.get("function")
+        arguments = entry.get("arguments", entry.get("parameters", {}))
+        if not isinstance(func_name, str) or not func_name.strip():
+            parse_errors.append("Tool call JSON must contain a string 'name'.")
+            continue
+        if isinstance(arguments, str):
+            try:
+                arguments = _loads_json_or_literal(arguments)
+            except Exception:
+                parse_errors.append(f"Tool '{func_name}' has non-JSON string arguments.")
+                arguments = {}
+        if arguments is None:
+            arguments = {}
+        if not isinstance(arguments, dict):
+            parse_errors.append(f"Tool '{func_name}' arguments must be a JSON object.")
+            arguments = {}
+        tool_calls.append(
+            {
+                "id": f"{func_name}_{call_id_counter}",
+                "type": "function",
+                "function": {
+                    "name": func_name.strip(),
+                    "arguments": arguments,
+                },
+            }
+        )
+        call_id_counter += 1
+
+    result = {"role": "assistant", "content": think_body or "", "tool_calls": tool_calls}
+    if strict and parse_errors:
+        result["_bfcl_parse_error"] = "; ".join(parse_errors)
     return result
 
 
@@ -550,6 +650,32 @@ def tools_schema_to_toolace_official_prompt(
     )
 
 
+def tools_schema_to_envtuning_prompt(
+    tools_schema: List[Dict[str, Any]],
+) -> str:
+    """EnvTuning-compatible XML + JSON interaction protocol for BFCL."""
+    function_docs = json.dumps(tools_schema, ensure_ascii=False, separators=(",", ":"))
+    return (
+        "You are an expert in composing functions. You are given a question and "
+        "a set of possible functions. Based on the question, you will need to "
+        "make one or more function/tool calls to achieve the purpose.\n\n"
+        "Your response must first outline your thought process inside exactly "
+        "one <think></think> pair.\n\n"
+        "If you decide to invoke function(s), return a JSON object or JSON list "
+        "inside exactly one <tool_call></tool_call> pair. Each object must use "
+        'the schema {"name": <function-name>, "arguments": <args-json-object>}.\n'
+        "If none of the functions can be used, or if the request lacks required "
+        "parameters, provide the final response inside exactly one "
+        "<answer></answer> pair.\n\n"
+        "Do not include text outside the XML tags. Do not use Python-style "
+        "function-call syntax in this mode.\n\n"
+        "Here is a list of functions in JSON format that you can invoke:\n"
+        "<tools>\n"
+        f"{function_docs}\n"
+        "</tools>"
+    )
+
+
 def tools_schema_to_qwen_prompt(tools_schema, prompt_mode: str = "bfcl_qwen_fc"):
     """
     将 tools_schema 转换为符合 Qwen 模型 chat_template 的工具描述 prompt。
@@ -573,6 +699,8 @@ def tools_schema_to_qwen_prompt(tools_schema, prompt_mode: str = "bfcl_qwen_fc")
     """
     if prompt_mode == "toolace_official_prompt":
         return tools_schema_to_toolace_official_prompt(tools_schema)
+    if prompt_mode == "envtuning_fc":
+        return tools_schema_to_envtuning_prompt(tools_schema)
 
     if not tools_schema:
         return ""
@@ -683,6 +811,25 @@ def tool_message_to_qwen_text(tool_messages, result_mode: str = "bfcl_tool_respo
             else:
                 content_text = json.dumps(content, ensure_ascii=False)
             tool_entries.append(content_text)
+            continue
+        if result_mode == "envtuning_fc":
+            if isinstance(content, str):
+                try:
+                    content_obj = json.loads(content)
+                except Exception:
+                    content_obj = content
+            else:
+                content_obj = content
+            response_content = json.dumps(content_obj, ensure_ascii=False)
+            tool_entries.append(
+                "Here are the function's execution results. "
+                f"Execution results:{response_content}\n "
+                "If you believe you have already fulfilled the user's request, "
+                "please first outline your thought process in a <think></think> "
+                "pair, and then give a brief summary of the result in an "
+                "<answer></answer> pair. Otherwise, you should continue to call "
+                "until fulfilling user's request."
+            )
             continue
 
         # 确保 content 是 JSON 可序列化对象
@@ -1088,6 +1235,12 @@ class BfclEnv(BaseEnv):
                 "[Hint] In ToolACE BFCL prompt mode, output only a Python "
                 "function-call list, e.g. [tool_name(arg=\"value\")]. "
                 "Do not use <tool_call> tags or JSON objects."
+            )
+        elif parser_mode == "envtuning_fc":
+            hints.append(
+                "[Hint] In EnvTuning BFCL mode, output exactly one <think> block "
+                "followed by either one <tool_call> JSON block or one <answer> block. "
+                "Tool calls must use {\"name\": \"tool_name\", \"arguments\": {...}}."
             )
         else:
             hints.append(
