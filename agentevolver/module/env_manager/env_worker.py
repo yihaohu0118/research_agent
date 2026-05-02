@@ -1,5 +1,6 @@
 from typing import Optional
 import uuid
+import traceback
 
 from omegaconf import DictConfig, OmegaConf
 from loguru import logger
@@ -148,6 +149,7 @@ class EnvWorker(object):
 
         except Exception as e:
             self.env.release_instance(self.instance_id)
+            logger.error(f"[env_worker] FULL TRACEBACK for task {self.task_id}:\n{traceback.format_exc()}")
             raise RuntimeError(f"env.create_instance failed! error={e.args}") from e
 
         return traj_cmt
