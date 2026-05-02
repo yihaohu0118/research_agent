@@ -21,6 +21,11 @@ actor_rollout_ref:
       # checkpoint-manager post-save path. Use the local fast sharded saver for
       # this model so validation/best-checkpoint saves return cleanly.
       fast_sharded_save: true
+      # For Watt, keep checkpoints evaluation-oriented. Optimizer/extra state
+      # collection can hang during FSDP save, while OOD evaluation only needs
+      # actor model shards plus lightweight HF metadata.
+      save_contents: ['model']
+      load_contents: ['model']
 
 env_service:
   bfcl:
