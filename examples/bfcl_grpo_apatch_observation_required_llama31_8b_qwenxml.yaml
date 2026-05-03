@@ -42,6 +42,9 @@ env_service:
     terminate_on_parse_error: true
     reject_tool_call_with_content: true
     flag_python_literals_in_tool_json: true
+    # Base Llama often emits {"parameters": {...}} inside the Qwen XML shell.
+    # Treat it as an arguments alias for this compatibility run only.
+    accept_parameters_as_arguments: true
     observation_lite:
       enable: true
       apply_to_validation: false

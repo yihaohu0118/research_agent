@@ -214,6 +214,29 @@ def test_xml_json_python_literal_hint_is_opt_in():
     assert "not Python True/False/None" in flagged_parsed["_bfcl_parse_error"]
 
 
+def test_xml_json_parameters_alias_is_opt_in():
+    if not _require_bfcl_helpers():
+        return
+
+    content = (
+        '<tool_call>{"name": "search", '
+        '"parameters": {"query": "value"}}</tool_call>'
+    )
+    default_parsed = parse_assistant_content_to_tool_calls(
+        {"role": "assistant", "content": content},
+        strict=True,
+    )
+    alias_parsed = parse_assistant_content_to_tool_calls(
+        {"role": "assistant", "content": content},
+        strict=True,
+        accept_parameters_as_arguments=True,
+    )
+
+    assert "_bfcl_parse_error" in default_parsed
+    assert alias_parsed["tool_calls"] == [_tool_call("search", {"query": "value"})]
+    assert "_bfcl_parse_error" not in alias_parsed
+
+
 def test_llama31_official_parser_accepts_raw_parameters_json():
     if not _require_bfcl_helpers():
         return
@@ -461,6 +484,7 @@ if __name__ == "__main__":
     test_bfcl_t3rl_protocol_stays_available()
     test_xml_json_parser_can_reject_text_around_tool_calls()
     test_xml_json_python_literal_hint_is_opt_in()
+    test_xml_json_parameters_alias_is_opt_in()
     test_llama31_official_parser_accepts_raw_parameters_json()
     test_llama31_official_prompt_uses_raw_json_protocol()
     test_toolace_official_prompt_uses_bfcl_python_protocol()

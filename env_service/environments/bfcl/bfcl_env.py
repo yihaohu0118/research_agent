@@ -219,6 +219,7 @@ def parse_assistant_content_to_tool_calls(
     parser_mode: str = "xml_json",
     reject_tool_call_with_content: bool = False,
     flag_python_literals: bool = False,
+    accept_parameters_as_arguments: bool = False,
 ) -> Dict[str, Any]:
     """
     从 assistant 的 content 中解析出 tool_calls，并返回新的消息结构。
@@ -270,6 +271,12 @@ def parse_assistant_content_to_tool_calls(
             data = json.loads(json_str)
             if not isinstance(data, dict):
                 continue
+            if (
+                accept_parameters_as_arguments
+                and "arguments" not in data
+                and "parameters" in data
+            ):
+                data["arguments"] = data["parameters"]
             if "name" not in data or "arguments" not in data:
                 parse_errors.append("Tool call JSON must contain both 'name' and 'arguments'.")
                 continue
@@ -1130,6 +1137,9 @@ class BfclEnv(BaseEnv):
             ),
             flag_python_literals=bool(
                 self.params.get("flag_python_literals_in_tool_json", False)
+            ),
+            accept_parameters_as_arguments=bool(
+                self.params.get("accept_parameters_as_arguments", False)
             ),
         )
         parse_error = assistant_entry.pop("_bfcl_parse_error", None)
