@@ -214,7 +214,11 @@ def parse_llama31_official_content_to_tool_calls(
 
 
 def parse_assistant_content_to_tool_calls(
-    msg: Dict[str, Any], strict: bool = False, parser_mode: str = "xml_json"
+    msg: Dict[str, Any],
+    strict: bool = False,
+    parser_mode: str = "xml_json",
+    reject_tool_call_with_content: bool = False,
+    flag_python_literals: bool = False,
 ) -> Dict[str, Any]:
     """
     从 assistant 的 content 中解析出 tool_calls，并返回新的消息结构。
@@ -298,13 +302,22 @@ def parse_assistant_content_to_tool_calls(
             call_id_counter += 1
         except json.JSONDecodeError as e:
             print(f"JSON 解析失败: {json_str[:50]}... -> {e}")
-            parse_errors.append(f"Invalid tool call JSON: {e}")
+            literal_hint = ""
+            if flag_python_literals and re.search(r"\b(True|False|None)\b", json_str):
+                literal_hint = (
+                    " (use JSON true/false/null, not Python True/False/None)"
+                )
+            parse_errors.append(f"Invalid tool call JSON{literal_hint}: {e}")
             continue
 
     # 移除所有 tool call 部分，得到纯文本 content
     cleaned_content = re.sub(pattern, '', content, flags=re.DOTALL).strip()
     # 可选：清理多余的空白
     cleaned_content = re.sub(r'\n\s*\n', '\n\n', cleaned_content).strip()
+    if strict and reject_tool_call_with_content and cleaned_content:
+        parse_errors.append(
+            "Tool-call output must not include text outside <tool_call> blocks."
+        )
 
     result = {
         "role": "assistant",
@@ -1072,13 +1085,17 @@ class BfclEnv(BaseEnv):
         if cur_turn!=self.current_turn and (self.params.get('is_open_query',False)==True):
             # terminate the trajectory
             terminated=True
-        reward = self.evaluate(params={"sparse": True}) if terminated else 0.0
+        step_info = dict(getattr(self, "_last_step_info", {}) or {})
+        if terminated and step_info.get("bfcl_force_zero_reward"):
+            reward = 0.0
+        else:
+            reward = self.evaluate(params={"sparse": True}) if terminated else 0.0
         # print('state_msg.simple_dict',state_msg.simple_dict)
         return {
             "state": [state_msg.simple_dict],
             "reward": reward,
             "is_terminated": terminated,
-            "info": dict(getattr(self, "_last_step_info", {}) or {}),
+            "info": step_info,
         }
 
     def transition(
@@ -1108,6 +1125,12 @@ class BfclEnv(BaseEnv):
             assistant_entry,
             strict=bool(self.params.get("strict_tool_parser", True)),
             parser_mode=str(self.params.get("tool_call_parser", "xml_json")),
+            reject_tool_call_with_content=bool(
+                self.params.get("reject_tool_call_with_content", False)
+            ),
+            flag_python_literals=bool(
+                self.params.get("flag_python_literals_in_tool_json", False)
+            ),
         )
         parse_error = assistant_entry.pop("_bfcl_parse_error", None)
 
@@ -1124,6 +1147,16 @@ class BfclEnv(BaseEnv):
                 "static_fission_retryable": True,
                 "static_fission_reason": parse_error,
             }
+            if bool(self.params.get("terminate_on_parse_error", False)):
+                self._last_step_info = {
+                    **dict(getattr(self, "_last_step_info", {}) or {}),
+                    "bfcl_terminated_on_parse_error": True,
+                    "bfcl_force_zero_reward": True,
+                }
+                return StateMessage(
+                    role="user",
+                    content="[CONVERSATION_COMPLETED]",
+                )
             err_text = f"[ERROR] Invalid tool call format: {parse_error}"
             err_text = self._enrich_parse_error(err_text)
             return StateMessage(

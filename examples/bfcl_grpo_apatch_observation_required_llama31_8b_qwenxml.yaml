@@ -36,6 +36,12 @@ env_service:
     tool_prompt_mode: bfcl_qwen_fc
     tool_call_parser: xml_json
     tool_result_mode: bfcl_tool_response
+    # Llama tends to treat parser errors as an editing prompt and then loops
+    # on "should be ..." repairs. Keep this scoped to the Llama/qwenxml run:
+    # Qwen configs inherit the default behavior.
+    terminate_on_parse_error: true
+    reject_tool_call_with_content: true
+    flag_python_literals_in_tool_json: true
     observation_lite:
       enable: true
       apply_to_validation: false

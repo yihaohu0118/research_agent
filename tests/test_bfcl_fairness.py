@@ -167,6 +167,53 @@ def test_bfcl_t3rl_protocol_stays_available():
     assert "<tool_call>" not in tool_text
 
 
+def test_xml_json_parser_can_reject_text_around_tool_calls():
+    if not _require_bfcl_helpers():
+        return
+
+    content = (
+        '<tool_call>{"name": "search", "arguments": {"query": "value"}}</tool_call>'
+        "\n\nThis function call will search for the value."
+    )
+    default_parsed = parse_assistant_content_to_tool_calls(
+        {"role": "assistant", "content": content},
+        strict=True,
+    )
+    strict_parsed = parse_assistant_content_to_tool_calls(
+        {"role": "assistant", "content": content},
+        strict=True,
+        reject_tool_call_with_content=True,
+    )
+
+    assert "_bfcl_parse_error" not in default_parsed
+    assert default_parsed["tool_calls"] == [_tool_call("search", {"query": "value"})]
+    assert "_bfcl_parse_error" in strict_parsed
+    assert "outside <tool_call>" in strict_parsed["_bfcl_parse_error"]
+
+
+def test_xml_json_python_literal_hint_is_opt_in():
+    if not _require_bfcl_helpers():
+        return
+
+    content = (
+        '<tool_call>{"name": "lockDoors", '
+        '"arguments": {"unlock": False, "door": ["driver"]}}</tool_call>'
+    )
+    default_parsed = parse_assistant_content_to_tool_calls(
+        {"role": "assistant", "content": content},
+        strict=True,
+    )
+    flagged_parsed = parse_assistant_content_to_tool_calls(
+        {"role": "assistant", "content": content},
+        strict=True,
+        flag_python_literals=True,
+    )
+
+    assert "_bfcl_parse_error" in default_parsed
+    assert "not Python True/False/None" not in default_parsed["_bfcl_parse_error"]
+    assert "not Python True/False/None" in flagged_parsed["_bfcl_parse_error"]
+
+
 def test_llama31_official_parser_accepts_raw_parameters_json():
     if not _require_bfcl_helpers():
         return
@@ -412,6 +459,8 @@ if __name__ == "__main__":
     test_rejected_tool_calls_are_not_extracted_for_eval()
     test_bfcl_prompt_defaults_to_qwen_fc_protocol()
     test_bfcl_t3rl_protocol_stays_available()
+    test_xml_json_parser_can_reject_text_around_tool_calls()
+    test_xml_json_python_literal_hint_is_opt_in()
     test_llama31_official_parser_accepts_raw_parameters_json()
     test_llama31_official_prompt_uses_raw_json_protocol()
     test_toolace_official_prompt_uses_bfcl_python_protocol()
