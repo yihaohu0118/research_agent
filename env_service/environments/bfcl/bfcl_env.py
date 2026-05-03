@@ -238,7 +238,11 @@ def parse_assistant_content_to_tool_calls(
     if parser_mode == "llama31_official_fc":
         return parse_llama31_official_content_to_tool_calls(content, strict=strict)
     if parser_mode in {"toolace_fc", "toolace_official_prompt"}:
-        return parse_toolace_content_to_tool_calls(content, strict=strict)
+        return parse_toolace_content_to_tool_calls(
+            content,
+            strict=strict,
+            reject_tool_call_with_content=reject_tool_call_with_content,
+        )
     if parser_mode == "envtuning_fc":
         return parse_envtuning_content_to_tool_calls(content, strict=strict)
 
@@ -576,7 +580,9 @@ def _toolace_bracket_spans(content: str) -> list[tuple[int, int, str]]:
 
 
 def parse_toolace_content_to_tool_calls(
-    content: str, strict: bool = False
+    content: str,
+    strict: bool = False,
+    reject_tool_call_with_content: bool = False,
 ) -> Dict[str, Any]:
     spans = _toolace_bracket_spans(content)
     if not spans:
@@ -660,6 +666,10 @@ def parse_toolace_content_to_tool_calls(
     for start, end in reversed(consumed):
         cleaned = cleaned[:start] + cleaned[end:]
     cleaned = re.sub(r"\n\s*\n", "\n\n", cleaned).strip()
+    if strict and reject_tool_call_with_content and tool_calls and cleaned:
+        parse_errors.append(
+            "ToolACE output must not include text outside the function-call list."
+        )
 
     result = {"role": "assistant", "content": cleaned, "tool_calls": tool_calls}
     if strict and parse_errors:
@@ -729,11 +739,6 @@ def tools_schema_to_toolace_official_prompt(
         "format of [func_name1(params_name1=params_value1, "
         "params_name2=params_value2...), func_name2(params)].\n"
         "You SHOULD NOT include any other text in the response.\n\n"
-        "At each turn, you should try your best to complete the tasks requested "
-        "by the user within the current turn. Continue to output functions to call "
-        "until you have fulfilled the user's request to the best of your ability. "
-        "Once you have no more functions to call, the system will consider the "
-        "current turn complete and proceed to the next turn or task.\n\n"
         "Here is a list of functions in JSON format that you can invoke.\n"
         f"{function_docs}\n"
     )

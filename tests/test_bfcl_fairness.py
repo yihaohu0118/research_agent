@@ -364,11 +364,35 @@ def test_toolace_official_prompt_uses_bfcl_python_protocol():
     assert parsed["tool_calls"] == [_tool_call("search", {"query": "value", "top_k": 3})]
     assert parsed_bare["tool_calls"] == [_tool_call("search", {"query": "value"})]
     assert "[func_name1(" in prompt
+    assert "Continue to output functions" not in prompt
     assert "<tools>" not in prompt
     assert "<tool_call>" not in prompt
     assert "<tool_response>" not in tool_text
     assert tool_text.strip() == '{"ok": true}'
     assert tool_text_string.strip() == '{"output": "{\\"ok\\": true}"}'
+
+
+def test_toolace_official_parser_can_reject_text_around_calls():
+    if not _require_bfcl_helpers():
+        return
+
+    content = '[search(query="value")] The search has been completed.'
+    default_parsed = parse_assistant_content_to_tool_calls(
+        {"role": "assistant", "content": content},
+        strict=True,
+        parser_mode="toolace_official_prompt",
+    )
+    strict_parsed = parse_assistant_content_to_tool_calls(
+        {"role": "assistant", "content": content},
+        strict=True,
+        parser_mode="toolace_official_prompt",
+        reject_tool_call_with_content=True,
+    )
+
+    assert "_bfcl_parse_error" not in default_parsed
+    assert default_parsed["tool_calls"] == [_tool_call("search", {"query": "value"})]
+    assert "_bfcl_parse_error" in strict_parsed
+    assert "outside the function-call list" in strict_parsed["_bfcl_parse_error"]
 
 
 def test_toolace_official_parser_accepts_json_style_fallback():
@@ -488,6 +512,7 @@ if __name__ == "__main__":
     test_llama31_official_parser_accepts_raw_parameters_json()
     test_llama31_official_prompt_uses_raw_json_protocol()
     test_toolace_official_prompt_uses_bfcl_python_protocol()
+    test_toolace_official_parser_can_reject_text_around_calls()
     test_toolace_official_parser_accepts_json_style_fallback()
     test_envtuning_fc_protocol_uses_xml_json_schema()
     test_clean_trajectory_flags_tool_errors()
