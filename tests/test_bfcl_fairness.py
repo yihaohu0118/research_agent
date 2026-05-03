@@ -286,6 +286,10 @@ def test_toolace_official_prompt_uses_bfcl_python_protocol():
         {"role": "tool", "content": {"ok": True}, "tool_call_id": "search_1"},
         result_mode="toolace_official_prompt",
     )
+    tool_text_string = tool_message_to_qwen_text(
+        {"role": "tool", "content": '{"ok": true}', "tool_call_id": "search_1"},
+        result_mode="toolace_official_prompt",
+    )
 
     assert parsed["tool_calls"] == [_tool_call("search", {"query": "value", "top_k": 3})]
     assert parsed_bare["tool_calls"] == [_tool_call("search", {"query": "value"})]
@@ -293,6 +297,8 @@ def test_toolace_official_prompt_uses_bfcl_python_protocol():
     assert "<tools>" not in prompt
     assert "<tool_call>" not in prompt
     assert "<tool_response>" not in tool_text
+    assert tool_text.strip() == '{"ok": true}'
+    assert tool_text_string.strip() == '{"output": "{\\"ok\\": true}"}'
 
 
 def test_toolace_official_parser_accepts_json_style_fallback():

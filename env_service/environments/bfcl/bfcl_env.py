@@ -874,12 +874,25 @@ def tool_message_to_qwen_text(tool_messages, result_mode: str = "bfcl_tool_respo
                 content_text = json.dumps(content, ensure_ascii=False)
             tool_entries.append(f"<tool_response>\n{content_text}\n</tool_response>")
             continue
-        if result_mode in {"llama31_official", "toolace_official_prompt"}:
+        if result_mode == "llama31_official":
             if isinstance(content, str):
                 content_text = content
             else:
                 content_text = json.dumps(content, ensure_ascii=False)
             tool_entries.append(content_text)
+            continue
+        if result_mode == "toolace_official_prompt":
+            # vLLM's ToolACE chat template renders tool/ipython messages as a
+            # JSON object.  For string observations it emits
+            # {"output": message.content}; for mapping observations it emits the
+            # mapping directly.  Matching that surface keeps Llama/ToolACE from
+            # seeing a quoted JSON string as the whole tool result.
+            if isinstance(content, dict):
+                tool_entries.append(json.dumps(content, ensure_ascii=False))
+            else:
+                tool_entries.append(
+                    json.dumps({"output": str(content)}, ensure_ascii=False)
+                )
             continue
         if result_mode == "envtuning_fc":
             if isinstance(content, str):
