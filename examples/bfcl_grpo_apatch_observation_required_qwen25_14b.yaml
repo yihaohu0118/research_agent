@@ -22,7 +22,8 @@ actor_rollout_ref:
   rollout:
     tensor_model_parallel_size: 4
     gpu_memory_utilization: 0.6
-    max_num_batched_tokens: 32768
+    max_num_batched_tokens: 16384
+    max_num_seqs: 128
 
 env_service:
   bfcl:
@@ -43,4 +44,3 @@ tocf:
   advantage:
     apatch:
       enable: true
-
