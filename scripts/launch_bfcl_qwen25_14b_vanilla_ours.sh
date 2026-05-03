@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 CONFIG_PATH="${CONFIG_PATH:-${REPO_ROOT}/examples}"
-GPU_SET="${GPU_SET:-0,1,2,3}"
+GPU_SET="${GPU_SET:-${CUDA_VISIBLE_DEVICES:-0,1,2,3}}"
 
 run_exp() {
   local config_name="$1"
@@ -27,4 +27,3 @@ run_exp bfcl_grpo_apatch_observation_required_qwen25_14b "$@"
 
 echo ""
 echo "Finished Qwen2.5-14B vanilla RL and ours."
-
