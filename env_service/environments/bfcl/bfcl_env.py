@@ -75,6 +75,60 @@ def _loads_json_or_literal(fragment: str) -> Any:
         return ast.literal_eval(fragment)
 
 
+def _split_top_level_jsonish_values(text: str) -> List[str]:
+    """Split concatenated top-level JSON/Python-literal objects.
+
+    Llama-3.1 often emits multiple raw function-call objects separated by
+    newlines when a turn needs several tools. The official prompt prefers a
+    JSON list, but accepting newline-separated objects avoids turning a
+    semantically good multi-call plan into a parse-error loop.
+    """
+    fragments: list[str] = []
+    stack: list[str] = []
+    start: int | None = None
+    quote: str | None = None
+    escape = False
+
+    matching = {"{": "}", "[": "]"}
+
+    for idx, ch in enumerate(text):
+        if start is None:
+            if ch.isspace() or ch in ";,":
+                continue
+            if ch not in matching:
+                raise ValueError("expected raw JSON function call")
+            start = idx
+            stack.append(matching[ch])
+            continue
+
+        if quote is not None:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == quote:
+                quote = None
+            continue
+
+        if ch in ("'", '"'):
+            quote = ch
+        elif ch in matching:
+            stack.append(matching[ch])
+        elif ch in ("}", "]"):
+            if not stack or ch != stack[-1]:
+                raise ValueError("mismatched JSON brackets")
+            stack.pop()
+            if not stack:
+                fragments.append(text[start : idx + 1].strip())
+                start = None
+
+    if start is not None or stack:
+        raise ValueError("incomplete raw JSON function call")
+    if not fragments:
+        raise ValueError("expected raw JSON function call")
+    return fragments
+
+
 def _parse_llama31_payload(content: str) -> Any:
     text = _strip_json_code_fence(content.replace("<|python_tag|>", "")).strip()
     if not text:
@@ -84,14 +138,9 @@ def _parse_llama31_payload(content: str) -> Any:
     except Exception:
         pass
 
-    if ";" in text:
-        values = []
-        for part in text.split(";"):
-            part = part.strip().rstrip(",")
-            if part:
-                values.append(_loads_json_or_literal(part))
-        if values:
-            return values
+    fragments = _split_top_level_jsonish_values(text)
+    if len(fragments) > 1:
+        return [_loads_json_or_literal(fragment) for fragment in fragments]
 
     raise ValueError("expected raw JSON function call")
 
@@ -607,9 +656,11 @@ def tools_schema_to_llama31_official_prompt(
         "Given the following functions, please respond with a JSON for a function call "
         "with its proper arguments that best answers the given prompt.",
         "",
-        'Respond in the format {"name": function name, "parameters": dictionary of argument name and its value}.',
+        'For one function call, respond in the format {"name": function name, "parameters": dictionary of argument name and its value}.',
+        'If multiple function calls are needed in the same turn, respond with one raw JSON list of those objects, for example [{"name": "func1", "parameters": {...}}, {"name": "func2", "parameters": {...}}].',
         "Do not use variables.",
         "Return only raw JSON for function calls; do not wrap the JSON in <tool_call> tags.",
+        "Do not emit several standalone JSON objects on separate lines; use a JSON list for multiple calls.",
         "If no function can be used, or required parameters are missing, answer briefly in plain text.",
         "",
     ]

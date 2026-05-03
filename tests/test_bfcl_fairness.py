@@ -184,6 +184,45 @@ def test_llama31_official_parser_accepts_raw_parameters_json():
     assert parsed["tool_calls"] == [_tool_call("get_weather", {"city": "Paris"})]
 
 
+def test_llama31_official_parser_accepts_newline_separated_raw_json_calls():
+    if not _require_bfcl_helpers():
+        return
+
+    parsed = parse_assistant_content_to_tool_calls(
+        {
+            "role": "assistant",
+            "content": (
+                '{"name": "fillFuelTank", "parameters": {"fuelAmount": 40.5}}\n'
+                '{"name": "startEngine", "parameters": {"ignitionMode": "START"}}\n'
+                '{"name": "check_tire_pressure", "parameters": {}}'
+            ),
+        },
+        strict=True,
+        parser_mode="llama31_official_fc",
+    )
+
+    assert parsed["content"] == ""
+    assert parsed["tool_calls"] == [
+        _tool_call("fillFuelTank", {"fuelAmount": 40.5}),
+        {
+            "id": "startEngine_2",
+            "type": "function",
+            "function": {
+                "name": "startEngine",
+                "arguments": {"ignitionMode": "START"},
+            },
+        },
+        {
+            "id": "check_tire_pressure_3",
+            "type": "function",
+            "function": {
+                "name": "check_tire_pressure",
+                "arguments": {},
+            },
+        },
+    ]
+
+
 def test_llama31_official_prompt_uses_raw_json_protocol():
     if not _require_bfcl_helpers():
         return
@@ -204,6 +243,8 @@ def test_llama31_official_prompt_uses_raw_json_protocol():
     )
 
     assert '"parameters"' in prompt
+    assert "JSON list" in prompt
+    assert "Do not emit several standalone JSON objects" in prompt
     assert "<tool_call>\n{" not in prompt
     assert "<tool_response>" not in tool_text
 
