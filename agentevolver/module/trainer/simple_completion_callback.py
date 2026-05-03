@@ -28,13 +28,24 @@ class SimpleCompletionCallback(CompletionCallback):
         if "content" not in message:
             message["content"] = "vllm failed"
 
-        if message['content'] == '' or completions.choices[0].finish_reason != 'stop':
-            logger.warning(str(completions.choices[0].finish_reason))
+        finish_reason = completions.choices[0].finish_reason
+        mark_non_stop_as_invalid = bool(
+            self.config.actor_rollout_ref.rollout.get(
+                "mark_non_stop_as_invalid",
+                False,
+            )
+        )
+        should_mark_invalid = mark_non_stop_as_invalid and (
+            message['content'] == '' or finish_reason != 'stop'
+        )
+        if message['content'] == '' or finish_reason != 'stop':
+            logger.warning(str(finish_reason))
             logger.bind(bad_case=True).error('empty content or non-stop finish reason')
             logger.bind(bad_case=True).error(str(completions.choices[0]))
-            message['content'] == 'im_end'  # fill a token when vllm failed
+        if should_mark_invalid:
+            message['content'] = '[GENERATION_TRUNCATED]'  # short invalid marker for env interaction
 
-        t = {"role": message["role"], "request_id":completions.id, "content": message['content'], "tokens": [TokenAndProb(t) for t in completions.choices[0].logprobs.content]}
+        t = {"role": message["role"], "request_id":completions.id, "content": message['content'], "finish_reason": finish_reason, "tokens": [TokenAndProb(t) for t in completions.choices[0].logprobs.content]}
         messages.append(t)
 
     def postprocess(self, batch: DataProto, batch_conversations: List[List[Dict[str, str]]], n: int) -> DataProto:

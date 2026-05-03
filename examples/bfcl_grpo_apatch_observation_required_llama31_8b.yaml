@@ -15,11 +15,11 @@ trainer:
 data:
   # Llama-3.1 official tool calling places pretty-printed JSON function docs
   # in the first user message. BFCL validation can exceed the Qwen-oriented
-  # 8k prompt cap, so keep a larger prompt budget while restoring the normal
-  # BFCL response budget under max_model_len=16384.
+  # 8k prompt cap, so keep a larger prompt budget while capping responses to
+  # reduce Llama-format drift and runaway generations under max_model_len=16384.
   train_batch_size: 16
   max_prompt_length: 11264
-  max_response_length: 4096
+  max_response_length: 2048
 
 actor_rollout_ref:
   model:
@@ -27,6 +27,7 @@ actor_rollout_ref:
   rollout:
     response_length: ${data.max_response_length}
     max_model_len: 16384
+    mark_non_stop_as_invalid: true
     multi_turn:
       max_steps: 20
 
