@@ -27,6 +27,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-dir", required=True, help="Output HuggingFace model directory")
     parser.add_argument("--torch-dtype", default="bfloat16", choices=["float16", "bfloat16", "float32"])
     parser.add_argument("--max-shard-size", default="2GB")
+    parser.add_argument(
+        "--backend",
+        default="gloo",
+        choices=["gloo", "nccl"],
+        help="Distributed backend for DTensor collectives. Defaults to gloo because checkpoints are loaded on CPU.",
+    )
     return parser.parse_args()
 
 
@@ -42,13 +48,20 @@ def main() -> None:
     args = parse_args()
     dtype = dtype_from_name(args.torch_dtype)
 
-    backend = "nccl" if torch.cuda.is_available() else "gloo"
-    dist.init_process_group(backend=backend)
+    dist.init_process_group(backend=args.backend)
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     local_rank = int(os.environ.get("LOCAL_RANK", rank))
-    if torch.cuda.is_available():
+    if args.backend == "nccl":
+        cuda_device_count = torch.cuda.device_count()
+        if cuda_device_count < world_size:
+            raise RuntimeError(
+                f"NCCL backend needs at least {world_size} visible CUDA devices, "
+                f"but only {cuda_device_count} are visible."
+            )
         torch.cuda.set_device(local_rank)
+    elif rank == 0:
+        print("Using CPU/gloo DTensor collectives for checkpoint merge.")
 
     shard_path = os.path.join(args.actor_dir, f"model_world_size_{world_size}_rank_{rank}.pt")
     if not os.path.exists(shard_path):
