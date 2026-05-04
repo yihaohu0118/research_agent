@@ -45,7 +45,17 @@ class SimpleCompletionCallback(CompletionCallback):
         if should_mark_invalid:
             message['content'] = '[GENERATION_TRUNCATED]'  # short invalid marker for env interaction
 
-        t = {"role": message["role"], "request_id":completions.id, "content": message['content'], "finish_reason": finish_reason, "tokens": [TokenAndProb(t) for t in completions.choices[0].logprobs.content]}
+        logprobs = completions.choices[0].logprobs
+        token_logprobs = getattr(logprobs, "content", None) if logprobs is not None else None
+        tokens = [TokenAndProb(t) for t in token_logprobs] if token_logprobs else []
+
+        t = {
+            "role": message["role"],
+            "request_id": completions.id,
+            "content": message["content"],
+            "finish_reason": finish_reason,
+            "tokens": tokens,
+        }
         messages.append(t)
 
     def postprocess(self, batch: DataProto, batch_conversations: List[List[Dict[str, str]]], n: int) -> DataProto:

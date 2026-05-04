@@ -18,7 +18,6 @@ data:
 
 actor_rollout_ref:
   rollout:
-    mode: sync
     max_num_batched_tokens: 16384
     gpu_memory_utilization: 0.6
 
