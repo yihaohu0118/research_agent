@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 from collections import OrderedDict
 
 import torch
@@ -33,6 +34,15 @@ def parse_args() -> argparse.Namespace:
         choices=["gloo", "nccl"],
         help="Distributed backend for DTensor collectives. Defaults to gloo because checkpoints are loaded on CPU.",
     )
+    parser.add_argument(
+        "--metadata-source",
+        default=None,
+        help=(
+            "Optional HF model directory/repo to use for config, tokenizer, and generation metadata. "
+            "Useful for Llama/ToolACE checkpoints where verl actor metadata may rewrite multi-EOS "
+            "or tokenizer fields."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -42,6 +52,26 @@ def dtype_from_name(name: str) -> torch.dtype:
         "bfloat16": torch.bfloat16,
         "float32": torch.float32,
     }[name]
+
+
+def copy_metadata_files(source_dir: str, target_dir: str) -> None:
+    """Preserve HF metadata files exactly when a source model directory is provided."""
+    metadata_files = [
+        "config.json",
+        "generation_config.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "special_tokens_map.json",
+        "added_tokens.json",
+        "chat_template.jinja",
+        "tokenizer.model",
+        "merges.txt",
+        "vocab.json",
+    ]
+    for filename in metadata_files:
+        source_path = os.path.join(source_dir, filename)
+        if os.path.exists(source_path):
+            shutil.copy2(source_path, os.path.join(target_dir, filename))
 
 
 def main() -> None:
@@ -87,7 +117,8 @@ def main() -> None:
 
     if rank == 0:
         os.makedirs(args.target_dir, exist_ok=True)
-        config = AutoConfig.from_pretrained(args.actor_dir, trust_remote_code=True)
+        metadata_source = args.metadata_source or args.actor_dir
+        config = AutoConfig.from_pretrained(metadata_source, trust_remote_code=True)
         with init_empty_weights():
             model = AutoModelForCausalLM.from_config(config, torch_dtype=dtype, trust_remote_code=True)
         model.save_pretrained(
@@ -96,14 +127,17 @@ def main() -> None:
             safe_serialization=True,
             max_shard_size=args.max_shard_size,
         )
-        tokenizer = AutoTokenizer.from_pretrained(args.actor_dir, trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained(metadata_source, trust_remote_code=True)
         tokenizer.save_pretrained(args.target_dir)
 
-        generation_config = os.path.join(args.actor_dir, "generation_config.json")
+        generation_config = os.path.join(metadata_source, "generation_config.json")
         if os.path.exists(generation_config):
             from transformers import GenerationConfig
 
-            GenerationConfig.from_pretrained(args.actor_dir).save_pretrained(args.target_dir)
+            GenerationConfig.from_pretrained(metadata_source).save_pretrained(args.target_dir)
+
+        if args.metadata_source:
+            copy_metadata_files(args.metadata_source, args.target_dir)
 
         print(f"Saved HuggingFace checkpoint to {args.target_dir}")
 
